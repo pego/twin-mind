@@ -997,15 +997,20 @@ def cmd_reset(args):
 
 
 def cmd_prune(args):
-    """Prune old memories."""
+    """Prune old memories via filtered rebuild."""
     check_memvid()
-    
+
+    config = get_config()
+    if not config["output"]["color"] or not supports_color():
+        Colors.disable()
+
     memory_path = get_memory_path()
-    
+
     if not memory_path.exists():
-        print("❌ No memory store. Run: twin-mind init")
+        print(error("❌ No memory store. Run: twin-mind init"))
         sys.exit(1)
-    
+
+    # Parse date filter
     cutoff = None
     if args.before:
         if re.match(r'^\d+d$', args.before):
@@ -1018,17 +1023,104 @@ def cmd_prune(args):
             try:
                 cutoff = datetime.fromisoformat(args.before)
             except ValueError:
-                print(f"❌ Invalid date format: {args.before}")
+                print(error(f"❌ Invalid date format: {args.before}"))
                 print("   Use: YYYY-MM-DD, 30d (days), or 2w (weeks)")
                 sys.exit(1)
-    
+
     if not cutoff and not args.tag:
-        print("❌ Specify --before DATE or --tag TAG to prune")
+        print(error("❌ Specify --before DATE or --tag TAG to prune"))
         sys.exit(1)
-    
-    print(f"⚠️  Pruning is not yet implemented in memvid-sdk")
-    print(f"   Workaround: Use 'twin-mind reset memory' to clear all")
-    print(f"   Then manually re-add important memories")
+
+    # Load all memories
+    mem = Memvid.open(str(memory_path))
+    req = SearchRequest(query="*", top_k=100000, snippet_chars=10000)
+    response = mem.search(req)
+
+    if not response.hits:
+        print("📭 No memories to prune")
+        return
+
+    # Filter memories to remove
+    to_remove = []
+    to_keep = []
+
+    for hit in response.hits:
+        should_remove = False
+
+        # Skip system entries - always keep
+        if hit.uri and "twin-mind://system" in hit.uri:
+            to_keep.append(hit)
+            continue
+
+        # Check date filter
+        if cutoff and hit.uri:
+            try:
+                # URI format: twin-mind://memory/YYYYMMDD_HHMMSS
+                if "twin-mind://memory/" in hit.uri:
+                    date_part = hit.uri.split("/")[-1]
+                    mem_date = datetime.strptime(date_part, "%Y%m%d_%H%M%S")
+                    if mem_date < cutoff:
+                        should_remove = True
+            except (ValueError, IndexError):
+                pass
+
+        # Check tag filter
+        if args.tag:
+            tag_lower = args.tag.lower()
+            title_lower = (hit.title or "").lower()
+            text_lower = hit.text.lower() if hit.text else ""
+            if tag_lower in title_lower or f"[{tag_lower}]" in text_lower:
+                should_remove = True
+
+        if should_remove:
+            to_remove.append(hit)
+        else:
+            to_keep.append(hit)
+
+    if not to_remove:
+        print(success("✅ No memories match prune criteria"))
+        return
+
+    # Show preview
+    print(f"\n🔍 Prune preview:")
+    print(f"   Matching: {len(to_remove)} memories")
+    for hit in to_remove[:5]:
+        title = (hit.title or "untitled")[:50]
+        print(f"   - \"{title}\"")
+    if len(to_remove) > 5:
+        print(f"   ... and {len(to_remove) - 5} more")
+
+    # Dry run stops here
+    if getattr(args, 'dry_run', False):
+        print(f"\n   Would keep {len(to_keep)} memories")
+        return
+
+    # Confirm
+    if not getattr(args, 'force', False):
+        if not confirm(f"\n⚠️  Delete {len(to_remove)} memories?"):
+            print("   Cancelled")
+            return
+
+    # Backup
+    import shutil
+    backup_path = Path(str(memory_path) + '.backup')
+    shutil.copy2(memory_path, backup_path)
+    print(f"💾 Backed up to {backup_path}")
+
+    # Rebuild with kept memories
+    memory_path.unlink()
+    new_mem = Memvid.create(str(memory_path))
+
+    for hit in to_keep:
+        opts = PutOptions.builder() \
+            .title(hit.title or "untitled") \
+            .uri(hit.uri or f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}") \
+            .build()
+        new_mem.put_bytes_with_options(hit.text.encode('utf-8'), opts)
+
+    new_mem.commit()
+
+    print(success(f"✅ Pruned {len(to_remove)} memories ({len(to_keep)} remaining)"))
 
 
 def cmd_export(args):
