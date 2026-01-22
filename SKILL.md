@@ -5,7 +5,7 @@ description: Codebase knowledge + conversation memory. Use proactively for code 
 
 # Twin-Mind
 
-Dual memory layer: **code index** (resettable) + **conversation memory** (persistent).
+Dual memory layer: **code index** (resettable) + **conversation memory** (local + shared).
 
 ## Auto-Search Behavior
 
@@ -41,11 +41,35 @@ First command in a new project auto-initializes.
 | Find code | `twin-mind search "query" --in code` |
 | Find decisions | `twin-mind search "query" --in memory` |
 | Find both | `twin-mind search "query"` |
-| Save insight | `twin-mind remember "message" --tag TAG` |
+| Save insight (local) | `twin-mind remember "message" --tag TAG` |
+| Save insight (shared) | `twin-mind remember "message" --share` |
 | Get context | `twin-mind context "topic"` |
 | Check status | `twin-mind status` |
 | Reindex | `twin-mind reindex` |
-| Full reindex | `twin-mind index --fresh` |
+
+## Memory Storage
+
+Twin-mind supports two types of memory storage:
+
+| Storage | File | Versioned | Use Case |
+|---------|------|-----------|----------|
+| **Local** | `memory.mv2` | No | Personal notes, session context |
+| **Shared** | `decisions.jsonl` | Yes | Team decisions, architecture choices |
+
+**Default behavior:**
+- `twin-mind remember "X"` → saves to local `memory.mv2`
+- `twin-mind remember "X" --share` → saves to shared `decisions.jsonl`
+
+**Team configuration** (everyone shares by default):
+```json
+{
+  "twin-mind": {
+    "share_memories": true
+  }
+}
+```
+
+When `share_memories: true`, all memories go to `decisions.jsonl` (can override with `--local`).
 
 ## Tags for Memories
 
@@ -73,64 +97,30 @@ User: "Why did we use Redis for sessions?"
 > Answer with the recorded rationale
 ```
 
-**After making a decision:**
+**After making a team decision:**
 ```
-> Run: twin-mind remember "Chose PostgreSQL over MySQL for ACID compliance and JSON support" --tag arch
-```
-
-**Finding implementations:**
-```
-User: "Where is user validation implemented?"
-> Run: twin-mind search "user validation" --in code
-> Provide file paths and relevant code snippets
+> Run: twin-mind remember "Chose PostgreSQL over MySQL for ACID compliance" --tag arch --share
 ```
 
-## Output Formats
-
-For structured processing, use `--json` flag:
-```bash
-twin-mind search "query" --json
-twin-mind context "topic" --json
+**Personal note:**
+```
+> Run: twin-mind remember "Need to refactor auth module tomorrow" --tag todo --local
 ```
 
 ## Architecture
 
 ```
-~/.twin-mind/
-├── venv/              # Isolated Python environment
-├── twin-mind.py       # Main script
-└── version.txt        # For updates
-
 your-project/.claude/
-├── code.mv2           # Codebase index (resettable)
-├── memory.mv2         # Decisions/insights (persistent)
-└── index_state.json   # Index metadata
+├── code.mv2           # Codebase index (gitignored)
+├── memory.mv2         # Local memories (gitignored)
+├── decisions.jsonl    # Shared decisions (versioned, mergeable)
+└── index-state.json   # Index metadata (gitignored)
 ```
 
-**Why separate stores?**
-- Code changes often > reset without losing decisions
-- Prevents stale code from causing hallucinations
-- Different retention policies for different data
-
-## Workflows
-
-### After a refactor
-```bash
-twin-mind reindex           # Reset and fresh index
-# Memories preserved!
-```
-
-### Daily development
-```bash
-twin-mind remember "Fixed auth bug - was missing token refresh" --tag bugfix
-twin-mind remember "Chose Redis for session store" --tag arch
-```
-
-### Maintenance
-```bash
-twin-mind status                     # Check health
-twin-mind prune memory --before 30d  # Clean old memories
-```
+**Why this structure?**
+- `decisions.jsonl` uses JSONL format = git can merge parallel additions
+- Local memories stay private, shared decisions are team knowledge
+- Code index is regeneratable, no need to version
 
 ## Configuration
 
@@ -139,8 +129,7 @@ Optional `.claude/settings.json`:
 ```json
 {
   "twin-mind": {
-    "auto_search": true,
-    "auto_index": true,
+    "share_memories": false,
     "extensions": {
       "include": [],
       "exclude": [".min.js", ".bundle.js"]

@@ -131,6 +131,9 @@ DEFAULT_CONFIG = {
     "output": {
         "color": True,
         "verbose": False
+    },
+    "memory": {
+        "share_memories": False  # If True, memories go to shared decisions.jsonl
     }
 }
 
@@ -174,6 +177,11 @@ def load_config() -> dict:
                     config["index"].update(user_config["index"])
                 if "output" in user_config:
                     config["output"].update(user_config["output"])
+                if "memory" in user_config:
+                    config["memory"].update(user_config["memory"])
+                # Legacy support: share_memories at top level
+                if "share_memories" in user_config:
+                    config["memory"]["share_memories"] = user_config["share_memories"]
         except (json.JSONDecodeError, IOError) as e:
             print(warning(f"⚠️  Config parse error: {e}. Using defaults."))
 
@@ -530,6 +538,108 @@ def get_code_path() -> Path:
 
 def get_memory_path() -> Path:
     return get_brain_dir() / MEMORY_FILE
+
+
+def get_decisions_path() -> Path:
+    """Get path to shared decisions file (JSONL format)."""
+    return get_brain_dir() / "decisions.jsonl"
+
+
+def get_git_author() -> str:
+    """Get author name from git config or environment."""
+    try:
+        result = subprocess.run(
+            ['git', 'config', 'user.name'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+
+    # Fallback to environment or username
+    import os
+    return os.environ.get('USER', os.environ.get('USERNAME', 'unknown'))
+
+
+def write_shared_memory(message: str, tag: str = None) -> bool:
+    """Write a memory to the shared decisions.jsonl file."""
+    decisions_path = get_decisions_path()
+
+    entry = {
+        "ts": datetime.now().isoformat(),
+        "msg": message,
+        "tag": tag or "general",
+        "author": get_git_author()
+    }
+
+    try:
+        # Append to file (create if doesn't exist)
+        with open(decisions_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        return True
+    except Exception as e:
+        print(error(f"❌ Failed to write shared memory: {e}"))
+        return False
+
+
+def read_shared_memories() -> list:
+    """Read all memories from decisions.jsonl."""
+    decisions_path = get_decisions_path()
+    memories = []
+
+    if not decisions_path.exists():
+        return memories
+
+    try:
+        with open(decisions_path, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    memories.append(entry)
+                except json.JSONDecodeError:
+                    # Skip malformed lines
+                    pass
+    except Exception:
+        pass
+
+    return memories
+
+
+def search_shared_memories(query: str, top_k: int = 10) -> list:
+    """Search shared memories using simple text matching.
+
+    Returns list of (score, entry) tuples sorted by relevance.
+    """
+    memories = read_shared_memories()
+    if not memories:
+        return []
+
+    query_lower = query.lower()
+    query_words = set(query_lower.split())
+    results = []
+
+    for entry in memories:
+        msg = entry.get('msg', '').lower()
+        tag = entry.get('tag', '').lower()
+
+        # Simple scoring: count matching words + bonus for tag match
+        score = 0
+        for word in query_words:
+            if word in msg:
+                score += msg.count(word)
+            if word in tag:
+                score += 2  # Tag matches are more significant
+
+        if score > 0:
+            results.append((score, entry))
+
+    # Sort by score descending
+    results.sort(key=lambda x: x[0], reverse=True)
+    return results[:top_k]
 
 
 def ensure_brain_dir():
@@ -970,36 +1080,59 @@ def index_files_incremental(mem, changed_files: list[str], config: dict, args) -
 
 def cmd_remember(args):
     """Store a memory/decision/insight."""
-    check_memvid()
+    config = get_config()
 
-    memory_path = get_memory_path()
-
-    if not memory_path.exists():
-        print("❌ Twin-Mind not initialized. Run: twin-mind init")
-        sys.exit(1)
+    # Determine destination: shared (decisions.jsonl) or local (memory.mv2)
+    # Priority: explicit flags > config > default (local)
+    use_shared = False
+    if hasattr(args, 'share') and args.share:
+        use_shared = True
+    elif hasattr(args, 'local') and args.local:
+        use_shared = False
+    elif config["memory"].get("share_memories", False):
+        use_shared = True
 
     # Create title from message
     title = args.message[:50]
     if len(args.message) > 50:
         title += "..."
 
-    # Build tags
-    tags = [f"timestamp:{datetime.now().isoformat()}"]
-    if args.tag:
-        tags.append(f"category:{args.tag}")
-    else:
-        tags.append("category:general")
-
-    with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
-        mem.put(
-            title=title,
-            text=args.message,
-            uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            tags=tags
-        )
-
     tag_str = f" [{args.tag}]" if args.tag else ""
-    print(f"✅ Remembered{tag_str}: {title}")
+
+    if use_shared:
+        # Write to shared decisions.jsonl
+        if write_shared_memory(args.message, args.tag):
+            author = get_git_author()
+            print(f"✅ Shared{tag_str}: {title}")
+            print(f"   📤 Added to decisions.jsonl (by {author})")
+        else:
+            sys.exit(1)
+    else:
+        # Write to local memory.mv2
+        check_memvid()
+        memory_path = get_memory_path()
+
+        if not memory_path.exists():
+            print("❌ Twin-Mind not initialized. Run: twin-mind init")
+            sys.exit(1)
+
+        # Build tags for memvid
+        tags = [f"timestamp:{datetime.now().isoformat()}"]
+        if args.tag:
+            tags.append(f"category:{args.tag}")
+        else:
+            tags.append("category:general")
+
+        with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+            mem.put(
+                title=title,
+                text=args.message,
+                uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                tags=tags
+            )
+
+        print(f"✅ Remembered{tag_str}: {title}")
+        print(f"   📝 Saved to local memory.mv2")
 
 
 def cmd_search(args):
@@ -1033,12 +1166,27 @@ def cmd_search(args):
             for hit in response.get('hits', []):
                 results.append(('code', hit))
 
-    # Search memory
+    # Search local memory (memory.mv2)
     if args.scope in ('memory', 'all') and memory_path.exists():
         with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
             response = mem.find(args.query, k=args.top_k, snippet_chars=snippet_chars)
             for hit in response.get('hits', []):
                 results.append(('memory', hit))
+
+    # Search shared memories (decisions.jsonl)
+    if args.scope in ('memory', 'all'):
+        shared_results = search_shared_memories(args.query, top_k=args.top_k)
+        for score, entry in shared_results:
+            # Convert to hit-like format for consistency
+            hit = {
+                'title': f"[{entry.get('tag', 'general')}] {entry.get('msg', '')[:40]}...",
+                'text': entry.get('msg', ''),
+                'score': score / 10.0,  # Normalize score
+                'uri': f"twin-mind://shared/{entry.get('ts', '')}",
+                'tags': [f"category:{entry.get('tag', 'general')}", f"author:{entry.get('author', '')}"],
+                'timestamp': entry.get('ts', '')
+            }
+            results.append(('shared', hit))
 
     # Sort by score and limit
     results.sort(key=lambda x: x[1].get('score', 0), reverse=True)
@@ -1078,7 +1226,7 @@ def cmd_search(args):
     print("=" * 60)
 
     for i, (source, hit) in enumerate(results, 1):
-        icon = "📄" if source == 'code' else "📝"
+        icon = "📄" if source == 'code' else ("📤" if source == 'shared' else "📝")
         title = hit.get('title', 'untitled')
 
         print(f"\n{icon} [{i}] {title}")
@@ -1131,39 +1279,59 @@ def cmd_ask(args):
 
 
 def cmd_recent(args):
-    """Show recent memories."""
-    check_memvid()
+    """Show recent memories (local + shared)."""
+    all_entries = []
 
+    # Get local memories from memory.mv2
     memory_path = get_memory_path()
+    if memory_path.exists():
+        check_memvid()
+        with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+            entries = mem.timeline()
+            for entry in entries:
+                preview = entry.get('preview', '')
+                title = 'untitled'
+                text = preview
+                if '\ntitle: ' in preview:
+                    parts = preview.split('\ntitle: ')
+                    text = parts[0]
+                    title_part = parts[1].split('\n')[0] if len(parts) > 1 else ''
+                    title = title_part or 'untitled'
+                all_entries.append({
+                    'source': 'local',
+                    'title': title,
+                    'text': text,
+                    'timestamp': entry.get('timestamp', 0)
+                })
 
-    if not memory_path.exists():
-        print("❌ No memory store. Run: twin-mind init")
-        sys.exit(1)
+    # Get shared memories from decisions.jsonl
+    shared_memories = read_shared_memories()
+    for entry in shared_memories:
+        try:
+            ts = datetime.fromisoformat(entry.get('ts', '')).timestamp()
+        except (ValueError, TypeError):
+            ts = 0
+        all_entries.append({
+            'source': 'shared',
+            'title': f"[{entry.get('tag', 'general')}] by {entry.get('author', 'unknown')}",
+            'text': entry.get('msg', ''),
+            'timestamp': ts
+        })
 
-    with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
-        entries = mem.timeline()
-        # Sort by timestamp descending (most recent first) and limit
-        entries = sorted(entries, key=lambda x: x.get('timestamp', 0), reverse=True)[:args.n]
+    # Sort by timestamp descending (most recent first) and limit
+    all_entries = sorted(all_entries, key=lambda x: x.get('timestamp', 0), reverse=True)[:args.n]
 
-    if not entries:
+    if not all_entries:
         print("📭 No memories yet. Use: twin-mind remember <message>")
         return
 
-    print(f"\n📝 Recent Memories ({len(entries)})\n")
+    print(f"\n📝 Recent Memories ({len(all_entries)})\n")
     print("=" * 60)
 
-    for i, entry in enumerate(entries, 1):
-        # Extract title from preview (format: "text\ntitle: X\nuri: Y\ntags: Z")
-        preview = entry.get('preview', '')
-        title = 'untitled'
-        text = preview
-        if '\ntitle: ' in preview:
-            parts = preview.split('\ntitle: ')
-            text = parts[0]
-            title_part = parts[1].split('\n')[0] if len(parts) > 1 else ''
-            title = title_part or 'untitled'
-        print(f"\n[{i}] {title}")
-        print(f"    {text[:150]}")
+    for i, entry in enumerate(all_entries, 1):
+        icon = "📤" if entry['source'] == 'shared' else "📝"
+        print(f"\n{icon} [{i}] {entry['title']}")
+        print(f"    {entry['text'][:150]}")
 
 
 def cmd_stats(args):
@@ -1196,17 +1364,30 @@ def cmd_stats(args):
 
     print()
 
-    # Memory stats
+    # Local memory stats
     if memory_path.exists():
         mem_size = format_size(memory_path.stat().st_size)
         with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
             stats = mem.stats()
             mem_count = stats.get('frame_count', 0)
-        print(f"📝 Memory Store: {memory_path}")
+        print(f"📝 Local Memory: {memory_path}")
         print(f"   Size:         {mem_size}")
         print(f"   Memories:     {mem_count}")
     else:
-        print(f"📝 Memory Store: Not created")
+        print(f"📝 Local Memory: Not created")
+
+    print()
+
+    # Shared memory stats
+    decisions_path = get_decisions_path()
+    if decisions_path.exists():
+        shared_size = format_size(decisions_path.stat().st_size)
+        shared_count = len(read_shared_memories())
+        print(f"📤 Shared:       {decisions_path}")
+        print(f"   Size:         {shared_size}")
+        print(f"   Decisions:    {shared_count}")
+    else:
+        print(f"📤 Shared:       No shared decisions yet")
 
     print("=" * 45)
 
@@ -1580,7 +1761,7 @@ def cmd_status(args):
     else:
         print(f"📄 Code     {warning('not created')}")
 
-    # Memory stats
+    # Local memory stats
     if memory_path.exists():
         mem_size = format_size(memory_path.stat().st_size)
         try:
@@ -1589,9 +1770,18 @@ def cmd_status(args):
                 mem_count = stats.get('frame_count', 0)
         except Exception:
             mem_count = "?"
-        print(f"📝 Memory   {mem_size:>8} │ {mem_count} entries")
+        print(f"📝 Local    {mem_size:>8} │ {mem_count} entries")
     else:
-        print(f"📝 Memory   {warning('not created')}")
+        print(f"📝 Local    {warning('not created')}")
+
+    # Shared memory stats
+    decisions_path = get_decisions_path()
+    if decisions_path.exists():
+        shared_size = format_size(decisions_path.stat().st_size)
+        shared_count = len(read_shared_memories())
+        print(f"📤 Shared   {shared_size:>8} │ {shared_count} decisions")
+    else:
+        print(f"📤 Shared   {'none':>8} │ (use --share or set share_memories: true)")
 
     # Git status
     if is_git_repo():
@@ -1768,6 +1958,11 @@ Repository: https://github.com/your-username/twin-mind
     p_remember = subparsers.add_parser('remember', help='Store a memory')
     p_remember.add_argument('message', help='What to remember')
     p_remember.add_argument('--tag', '-t', help='Category tag (arch, bugfix, feature, etc.)')
+    p_remember_dest = p_remember.add_mutually_exclusive_group()
+    p_remember_dest.add_argument('--local', action='store_true',
+                                  help='Force save to local memory.mv2 (not shared)')
+    p_remember_dest.add_argument('--share', action='store_true',
+                                  help='Force save to shared decisions.jsonl')
 
     # search
     p_search = subparsers.add_parser('search', help='Search twin-mind')

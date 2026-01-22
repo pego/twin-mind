@@ -1,9 +1,11 @@
 # Twin-Mind gitignore
 #
-# code.mv2 - Generated codebase index, large and regeneratable
-# index_state.json - Machine-specific index metadata
+# code.mv2 - Generated codebase index (regeneratable)
+# index-state.json - Machine-specific index metadata
+# memory.mv2 - Local/personal memories (not shared)
 #
-# memory.mv2 is NOT ignored - it contains valuable decisions to share
+# decisions.jsonl IS versioned - shared team decisions (JSONL = mergeable)
 
 code.mv2
 index-state.json
+memory.mv2

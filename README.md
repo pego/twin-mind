@@ -1,6 +1,6 @@
 # Twin-Mind
 
-**Dual memory for AI coding agents** - Codebase knowledge + Conversation memory in two portable `.mv2` files.
+**Dual memory for AI coding agents** - Codebase knowledge + Conversation memory with team-friendly sharing.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -28,7 +28,7 @@ Claude: "We chose JWT over sessions. Here's the middleware...
         And here's why we made that decision last week."
 ```
 
-Two files. Claude remembers everything - code AND decisions.
+Claude remembers everything - code AND decisions. Team decisions are shared and mergeable.
 
 ---
 
@@ -56,31 +56,25 @@ That's it! First command auto-initializes the project.
 ## Architecture
 
 ```
-~/.twin-mind/
-├── venv/              # Isolated Python environment
-├── twin-mind.py       # Main script
-└── version.txt        # Version info
-
 your-project/.claude/
-├── code.mv2           # Codebase index (resettable)
-├── memory.mv2         # Decisions/insights (persistent)
-└── index_state.json   # Index metadata
+├── code.mv2           # Codebase index (gitignored)
+├── memory.mv2         # Local memories (gitignored)
+├── decisions.jsonl    # Shared decisions (versioned, mergeable)
+└── index-state.json   # Index metadata (gitignored)
 ```
 
-### Why Two Stores?
+### Memory Types
 
-| | `code.mv2` | `memory.mv2` |
-|---|---|---|
-| **Contains** | Indexed source code | Decisions, bugs, insights |
-| **Lifecycle** | Reset after refactors | Long-term persistent |
-| **Git** | `.gitignore` | Commit & share |
-| **Risk** | Stale after changes | Valuable context |
+| Type | File | Versioned | Use Case |
+|------|------|-----------|----------|
+| **Code** | `code.mv2` | No | Indexed source code |
+| **Local** | `memory.mv2` | No | Personal notes, session context |
+| **Shared** | `decisions.jsonl` | **Yes** | Team decisions, architecture choices |
 
-**Benefits:**
-- Reset code index without losing decisions
-- Prevent hallucinations from stale code
-- Share project context with teammates
-- Sub-millisecond search (Memvid Rust core)
+**Why this structure?**
+- `decisions.jsonl` uses JSONL format = git can merge parallel additions
+- Local memories stay private, shared decisions become team knowledge
+- Code index is regeneratable, no need to version
 
 ---
 
@@ -90,15 +84,16 @@ your-project/.claude/
 
 | Command | Description |
 |---------|-------------|
-| `search <query>` | Search both stores |
+| `search <query>` | Search code + all memories |
 | `search <query> --in code` | Search only code |
-| `search <query> --in memory` | Search only memories |
-| `remember <msg>` | Store a decision or insight |
-| `remember <msg> --tag TAG` | Store with category |
+| `search <query> --in memory` | Search only memories (local + shared) |
+| `remember <msg>` | Store locally (default) |
+| `remember <msg> --share` | Store to shared decisions |
+| `remember <msg> --local` | Force store locally |
 | `context <query>` | Combined code+memory for prompts |
-| `status` | Health check (index age, git state) |
+| `status` | Health check |
 | `stats` | Display statistics |
-| `recent` | Show recent memories |
+| `recent` | Show recent memories (local + shared) |
 
 ### Index Commands
 
@@ -113,20 +108,54 @@ your-project/.claude/
 
 | Command | Description |
 |---------|-------------|
-| `init` | Initialize both memory stores |
+| `init` | Initialize memory stores |
 | `reset code` | Clear code index |
-| `reset memory` | Clear memories (permanent) |
+| `reset memory` | Clear local memories |
 | `prune memory --before 30d` | Remove old memories |
-| `prune memory --tag session` | Remove by tag |
 | `export --format md` | Export memories to markdown |
 | `uninstall` | Remove twin-mind installation |
 
-### Global Flags
+---
 
-| Flag | Description |
-|------|-------------|
-| `--no-color` | Disable colored output |
-| `-V, --version` | Show version |
+## Team Sharing
+
+### Default: Local memories
+
+```bash
+twin-mind remember "Fixed auth bug" --tag bugfix
+# Saved to memory.mv2 (not shared)
+```
+
+### Explicit sharing
+
+```bash
+twin-mind remember "Chose Redis for sessions" --tag arch --share
+# Saved to decisions.jsonl (versioned, shared with team)
+```
+
+### Team configuration (share by default)
+
+Add to `.claude/settings.json`:
+
+```json
+{
+  "twin-mind": {
+    "share_memories": true
+  }
+}
+```
+
+Now all `remember` commands go to `decisions.jsonl` by default. Use `--local` to override.
+
+### Why JSONL?
+
+When two developers add decisions in parallel:
+```jsonl
+{"ts":"2024-01-22T10:30:00Z","msg":"Chose Redis","tag":"arch","author":"alice"}
+{"ts":"2024-01-22T11:45:00Z","msg":"Fixed auth bug","tag":"bugfix","author":"bob"}
+```
+
+Git merges line additions cleanly. No binary conflicts.
 
 ---
 
@@ -138,9 +167,11 @@ your-project/.claude/
 # Find code
 twin-mind search "authentication middleware" --in code
 
-# Save decisions
-twin-mind remember "Fixed race condition in OrderService" --tag bugfix
-twin-mind remember "Using Redis for sessions instead of JWT" --tag arch
+# Save personal note
+twin-mind remember "TODO: refactor auth module" --tag todo
+
+# Save team decision
+twin-mind remember "Using Redis for sessions" --tag arch --share
 
 # Check what's been recorded
 twin-mind recent
@@ -157,20 +188,7 @@ twin-mind reindex
 
 ```bash
 twin-mind status                     # Check health
-twin-mind prune memory --before 30d  # Clean old memories
-```
-
-### Onboarding a Teammate
-
-```bash
-# Export your decisions
-twin-mind export --format md -o decisions.md
-
-# Or share the memory file directly
-cp .claude/memory.mv2 /shared/
-
-# Teammate copies it
-cp /shared/memory.mv2 .claude/
+twin-mind prune memory --before 30d  # Clean old local memories
 ```
 
 ---
@@ -198,27 +216,6 @@ Twin-mind installs as a Claude Code skill automatically. Claude will proactively
 - Where things are implemented
 - What changed recently
 
-### With Hooks (Auto-capture)
-
-Add to `.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [{
-          "type": "command",
-          "command": "twin-mind remember \"Modified: $CLAUDE_FILE_PATH\" --tag session",
-          "timeout": 5
-        }]
-      }
-    ]
-  }
-}
-```
-
 ---
 
 ## Configuration
@@ -228,8 +225,7 @@ Optional `.claude/settings.json`:
 ```json
 {
   "twin-mind": {
-    "auto_search": true,
-    "auto_index": true,
+    "share_memories": false,
     "extensions": {
       "include": [".py", ".ts", ".tsx"],
       "exclude": [".min.js", ".bundle.js"]
@@ -248,12 +244,11 @@ Configuration is optional - sensible defaults work out of box.
 
 ### Powered by Memvid
 
-Twin-Mind uses [Memvid](https://github.com/memvid/memvid) as its storage engine:
+Twin-Mind uses [Memvid](https://github.com/memvid/memvid) for code and local memory:
 
 - **Single-file format** (`.mv2`) - No database setup
 - **Sub-ms retrieval** - Native Rust core
 - **Semantic search** - BM25 + vector embeddings
-- **Portable** - Git commit, scp, share
 
 ### File Types Indexed
 
@@ -262,14 +257,6 @@ Twin-Mind uses [Memvid](https://github.com/memvid/memvid) as its storage engine:
 .cs .rb .php .swift .sql .sh .bash .yaml .yml .json .toml .xml
 .html .css .scss .md .txt .vue .svelte .astro .prisma .graphql
 .proto .tf
-```
-
-### Directories Skipped
-
-```
-node_modules .git __pycache__ .venv venv env .idea .vscode dist
-build target .next .nuxt coverage .pytest_cache .mypy_cache vendor
-.claude .terraform .serverless cdk.out .aws-sam
 ```
 
 ### Size Limits
