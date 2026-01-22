@@ -207,6 +207,72 @@ def get_config() -> dict:
     return _config_cache
 
 
+# === File Locking ===
+import time
+
+if sys.platform == 'win32':
+    import msvcrt
+    def _lock_file(f):
+        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+    def _unlock_file(f):
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+    def _lock_file(f):
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    def _unlock_file(f):
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
+class FileLock:
+    """Simple file-based lock with timeout."""
+
+    def __init__(self, path: Path, timeout: int = 5):
+        self.lock_path = Path(str(path) + '.lock')
+        self.timeout = timeout
+        self._lock_file = None
+
+    def acquire(self) -> bool:
+        """Acquire lock, return True if successful."""
+        start = time.time()
+        while time.time() - start < self.timeout:
+            try:
+                # Check for stale lock (>60s old)
+                if self.lock_path.exists():
+                    age = time.time() - self.lock_path.stat().st_mtime
+                    if age > 60:
+                        self.lock_path.unlink()
+
+                self._lock_file = open(self.lock_path, 'w')
+                _lock_file(self._lock_file)
+                self._lock_file.write(str(os.getpid()))
+                self._lock_file.flush()
+                return True
+            except (IOError, OSError):
+                time.sleep(0.1)
+        return False
+
+    def release(self):
+        """Release the lock."""
+        if self._lock_file:
+            try:
+                _unlock_file(self._lock_file)
+                self._lock_file.close()
+                if self.lock_path.exists():
+                    self.lock_path.unlink()
+            except (IOError, OSError):
+                pass
+            self._lock_file = None
+
+    def __enter__(self):
+        if not self.acquire():
+            raise IOError(f"Could not acquire lock on {self.lock_path} (timeout {self.timeout}s)")
+        return self
+
+    def __exit__(self, *args):
+        self.release()
+
+
 # === Helpers ===
 
 def check_memvid():
