@@ -115,6 +115,8 @@ your-project/.claude/
 | `export --format md` | Export memories to markdown |
 | `doctor` | Health check and diagnostics |
 | `doctor --vacuum` | Reclaim space from deletions |
+| `upgrade` | Check for updates and upgrade |
+| `upgrade --check` | Only check, don't install |
 | `uninstall` | Remove twin-mind installation |
 
 ---
