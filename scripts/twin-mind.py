@@ -563,56 +563,139 @@ Next steps:
 def cmd_index(args):
     """Index codebase into code store."""
     check_memvid()
-    
+
+    config = get_config()
     code_path = get_code_path()
-    
+
+    # Initialize colors based on config
+    if not config["output"]["color"] or not supports_color():
+        Colors.disable()
+
     if not get_brain_dir().exists():
-        print("❌ Twin-Mind not initialized. Run: twin-mind init")
+        print(error("❌ Twin-Mind not initialized. Run: twin-mind init"))
         sys.exit(1)
-    
-    # Fresh index = delete and recreate
-    if args.fresh and code_path.exists():
-        print("🔄 Fresh index requested, resetting code store...")
-        code_path.unlink()
-    
-    # Create or open
+
+    # Determine indexing mode
+    incremental = False
+    changed_files = []
+    deleted_files = []
+    state = load_index_state()
+
+    if args.fresh:
+        # Fresh index requested
+        if code_path.exists():
+            print(info("🔄 Fresh index requested, resetting code store..."))
+            code_path.unlink()
+    elif state and is_git_repo():
+        # Try incremental
+        last_commit = state.get("last_commit")
+        if last_commit:
+            commits_behind = get_commits_behind(last_commit)
+            if commits_behind == 0:
+                print(success("✅ Index is up to date (no new commits)"))
+                return
+            elif commits_behind > 0:
+                changed_files, deleted_files = get_changed_files(last_commit)
+                if changed_files or deleted_files:
+                    incremental = True
+                    print(info(f"📂 Incremental index (since {last_commit[:7]})"))
+                    print(f"   Changed: {len(changed_files)} files")
+                    print(f"   Deleted: {len(deleted_files)} files")
+                else:
+                    print(success("✅ Index is up to date"))
+                    return
+
+    # Dry run mode
+    if getattr(args, 'dry_run', False) or getattr(args, 'status', False):
+        if incremental:
+            print("\n   Would reindex:")
+            for f in changed_files[:10]:
+                print(f"   + {f}")
+            if len(changed_files) > 10:
+                print(f"   ... and {len(changed_files) - 10} more")
+        else:
+            codebase_root = Path.cwd()
+            extensions = get_extensions(config)
+            skip_dirs = get_skip_dirs(config)
+            max_size = parse_size(config["max_file_size"])
+
+            files = collect_files(codebase_root, extensions, skip_dirs, max_size)
+            print(f"\n   Would index {len(files)} files")
+            for f in files[:10]:
+                print(f"   + {f.relative_to(codebase_root)}")
+            if len(files) > 10:
+                print(f"   ... and {len(files) - 10} more")
+        return
+
+    # Open or create store
     if code_path.exists():
-        print("📝 Appending to existing code index...")
-        print("   (Use --fresh for clean reindex)")
+        if not incremental:
+            print(info("📝 Appending to existing code index..."))
+            print("   (Use --fresh for clean reindex)")
         mem = Memvid.open(str(code_path))
     else:
         mem = Memvid.create(str(code_path))
-    
-    # Collect files
-    codebase_root = Path.cwd()
-    print(f"📂 Scanning: {codebase_root}")
-    
+
+    # Use file locking for writes
+    with FileLock(code_path):
+        if incremental:
+            indexed = index_files_incremental(mem, changed_files, config, args)
+        else:
+            indexed = index_files_full(mem, config, args)
+
+        mem.commit()
+
+    # Save state
+    current_commit = get_current_commit()
+    if current_commit:
+        save_index_state(current_commit, indexed)
+
+    print(f"\n{success('✅')} Indexed {indexed} files")
+    print(f"   📦 Size: {format_size(code_path.stat().st_size)}")
+
+
+def collect_files(root: Path, extensions: set, skip_dirs: set, max_size: int) -> list[Path]:
+    """Collect all indexable files."""
     files = []
-    for item in codebase_root.rglob('*'):
+    for item in root.rglob('*'):
         if item.is_file():
-            parts = item.relative_to(codebase_root).parts
-            if any(p.startswith('.') or p in SKIP_DIRS for p in parts):
+            parts = item.relative_to(root).parts
+            if any(p.startswith('.') or p in skip_dirs for p in parts):
                 continue
-            if item.suffix.lower() in CODE_EXTENSIONS:
-                if item.stat().st_size <= MAX_FILE_SIZE:
+            if item.suffix.lower() in extensions:
+                if item.stat().st_size <= max_size:
                     files.append(item)
-    
+    return files
+
+
+def index_files_full(mem, config: dict, args) -> int:
+    """Full reindex of all files."""
+    codebase_root = Path.cwd()
+    extensions = get_extensions(config)
+    skip_dirs = get_skip_dirs(config)
+    max_size = parse_size(config["max_file_size"])
+    verbose = config["output"]["verbose"] or getattr(args, 'verbose', False)
+
+    print(f"📂 Scanning: {codebase_root}")
+    files = collect_files(codebase_root, extensions, skip_dirs, max_size)
     print(f"   Found {len(files)} files")
-    
+
     if not files:
-        print("   No indexable files found!")
-        return
-    
-    # Index files
+        print(warning("   No indexable files found!"))
+        return 0
+
+    progress = ProgressBar(len(files), prefix="📂 Indexing: ")
     indexed = 0
+
     for filepath in files:
         try:
             relative_path = filepath.relative_to(codebase_root)
             content = filepath.read_text(encoding='utf-8', errors='ignore')
-            
+
             if not content.strip():
+                progress.update()
                 continue
-            
+
             opts = PutOptions.builder() \
                 .title(str(relative_path)) \
                 .uri(f"file://{relative_path}") \
@@ -620,22 +703,68 @@ def cmd_index(args):
                 .tag("language", detect_language(filepath.suffix)) \
                 .tag("indexed_at", datetime.now().isoformat()) \
                 .build()
-            
+
             mem.put_bytes_with_options(content.encode('utf-8'), opts)
             indexed += 1
-            
-            if indexed % 50 == 0:
-                print(f"   Indexed {indexed}...")
-                
-        except Exception:
-            pass
-    
-    mem.commit()
-    
-    print(f"""
-✅ Indexed {indexed} files
-   📦 Size: {format_size(code_path.stat().st_size)}
-""")
+
+            if verbose:
+                print(f"   + {relative_path}")
+
+        except Exception as e:
+            if verbose:
+                print(warning(f"   ⚠️  Skip {filepath}: {e}"))
+
+        progress.update()
+
+    progress.finish()
+    return indexed
+
+
+def index_files_incremental(mem, changed_files: list[str], config: dict, args) -> int:
+    """Incremental reindex of changed files only."""
+    codebase_root = Path.cwd()
+    extensions = get_extensions(config)
+    max_size = parse_size(config["max_file_size"])
+    verbose = config["output"]["verbose"] or getattr(args, 'verbose', False)
+
+    indexed = 0
+
+    for rel_path in changed_files:
+        filepath = codebase_root / rel_path
+
+        if not filepath.exists():
+            continue
+
+        if filepath.suffix.lower() not in extensions:
+            continue
+
+        if filepath.stat().st_size > max_size:
+            continue
+
+        try:
+            content = filepath.read_text(encoding='utf-8', errors='ignore')
+            if not content.strip():
+                continue
+
+            opts = PutOptions.builder() \
+                .title(rel_path) \
+                .uri(f"file://{rel_path}") \
+                .tag("extension", filepath.suffix) \
+                .tag("language", detect_language(filepath.suffix)) \
+                .tag("indexed_at", datetime.now().isoformat()) \
+                .build()
+
+            mem.put_bytes_with_options(content.encode('utf-8'), opts)
+            indexed += 1
+
+            if verbose:
+                print(f"   + {rel_path}")
+
+        except Exception as e:
+            if verbose:
+                print(warning(f"   ⚠️  Skip {rel_path}: {e}"))
+
+    return indexed
 
 
 def cmd_remember(args):
