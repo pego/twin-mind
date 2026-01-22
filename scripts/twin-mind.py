@@ -1181,6 +1181,85 @@ def cmd_export(args):
         print(result)
 
 
+def cmd_status(args):
+    """Show twin-mind health status."""
+    check_memvid()
+
+    config = get_config()
+    if not config["output"]["color"] or not supports_color():
+        Colors.disable()
+
+    code_path = get_code_path()
+    memory_path = get_memory_path()
+
+    print(f"\n🧠 Twin-Mind Status")
+    print("═" * 50)
+
+    # Code stats
+    if code_path.exists():
+        code_size = format_size(code_path.stat().st_size)
+        try:
+            mem = Memvid.open(str(code_path))
+            code_count = len(mem.search(SearchRequest(query="*", top_k=10000)).hits)
+        except Exception:
+            code_count = "?"
+
+        age = get_index_age() or "unknown"
+        print(f"📄 Code     {code_size:>8} │ {code_count} files │ indexed {age}")
+    else:
+        print(f"📄 Code     {warning('not created')}")
+
+    # Memory stats
+    if memory_path.exists():
+        mem_size = format_size(memory_path.stat().st_size)
+        try:
+            mem = Memvid.open(str(memory_path))
+            mem_count = len(mem.search(SearchRequest(query="*", top_k=10000)).hits)
+        except Exception:
+            mem_count = "?"
+        print(f"📝 Memory   {mem_size:>8} │ {mem_count} entries")
+    else:
+        print(f"📝 Memory   {warning('not created')}")
+
+    # Git status
+    if is_git_repo():
+        branch = get_branch_name()
+        commit = get_current_commit()
+        commit_short = commit[:7] if commit else "?"
+
+        state = load_index_state()
+        if state and commit:
+            behind = get_commits_behind(state.get("last_commit", commit))
+            if behind > 0:
+                git_status = warning(f"{behind} commits ahead of index")
+            elif behind == 0:
+                git_status = success("up to date")
+            else:
+                git_status = "unknown"
+        else:
+            git_status = "not indexed yet"
+
+        print(f"🔗 Git      {branch} @ {commit_short} ({git_status})")
+
+    print("═" * 50)
+
+
+def cmd_reindex(args):
+    """Reset code and reindex (convenience command)."""
+    # Set up args for reset
+    args.target = 'code'
+    args.force = True
+    args.dry_run = False
+    cmd_reset(args)
+
+    # Set up args for index
+    args.fresh = True
+    args.dry_run = False
+    args.status = False
+    args.verbose = getattr(args, 'verbose', False)
+    cmd_index(args)
+
+
 # === Main ===
 
 def main():
@@ -1239,7 +1318,14 @@ Repository: https://github.com/your-username/twin-mind
     
     # stats
     subparsers.add_parser('stats', help='Show twin-mind statistics')
-    
+
+    # status
+    subparsers.add_parser('status', help='Show twin-mind health status')
+
+    # reindex
+    p_reindex = subparsers.add_parser('reindex', help='Reset code and reindex fresh')
+    p_reindex.add_argument('--verbose', '-v', action='store_true', help='Show each file')
+
     # reset
     p_reset = subparsers.add_parser('reset', help='Reset a memory store')
     p_reset.add_argument('target', choices=['code', 'memory', 'all'], help='What to reset')
@@ -1270,6 +1356,8 @@ Repository: https://github.com/your-username/twin-mind
         'ask': cmd_ask,
         'recent': cmd_recent,
         'stats': cmd_stats,
+        'status': cmd_status,
+        'reindex': cmd_reindex,
         'reset': cmd_reset,
         'prune': cmd_prune,
         'export': cmd_export
