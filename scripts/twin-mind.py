@@ -35,6 +35,62 @@ try:
 except ImportError:
     MEMVID_AVAILABLE = False
 
+
+# === Output Helpers ===
+class Colors:
+    """ANSI color codes for terminal output."""
+    RESET = "\033[0m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    BOLD = "\033[1m"
+
+    _enabled = True
+
+    @classmethod
+    def disable(cls):
+        cls.RESET = cls.RED = cls.GREEN = ""
+        cls.YELLOW = cls.BLUE = cls.BOLD = ""
+        cls._enabled = False
+
+    @classmethod
+    def is_enabled(cls):
+        return cls._enabled
+
+
+def supports_color() -> bool:
+    """Check if terminal supports color output."""
+    if os.environ.get('NO_COLOR'):
+        return False
+    if not hasattr(sys.stdout, 'isatty'):
+        return False
+    return sys.stdout.isatty()
+
+
+def color(text: str, color_code: str) -> str:
+    """Wrap text in color code."""
+    if not Colors._enabled:
+        return text
+    return f"{color_code}{text}{Colors.RESET}"
+
+
+def success(msg: str) -> str:
+    return color(msg, Colors.GREEN)
+
+
+def warning(msg: str) -> str:
+    return color(msg, Colors.YELLOW)
+
+
+def error(msg: str) -> str:
+    return color(msg, Colors.RED)
+
+
+def info(msg: str) -> str:
+    return color(msg, Colors.BLUE)
+
+
 # === Configuration ===
 BRAIN_DIR = ".claude"
 CODE_FILE = "code.mv2"
