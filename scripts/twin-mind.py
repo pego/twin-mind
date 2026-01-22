@@ -536,6 +536,138 @@ def ensure_brain_dir():
     get_brain_dir().mkdir(parents=True, exist_ok=True)
 
 
+# === Auto-Initialization ===
+
+# Directories where auto-init should be skipped
+UNSAFE_DIRS = {
+    '/',
+    '/usr', '/etc', '/var', '/tmp', '/opt', '/bin', '/sbin',
+    '/System', '/Library', '/Applications',  # macOS
+    '/Windows', '/Program Files', '/Program Files (x86)',  # Windows
+}
+
+
+def is_safe_directory() -> bool:
+    """Check if current directory is safe for auto-initialization."""
+    cwd = Path.cwd().resolve()
+    cwd_str = str(cwd)
+
+    # Don't init in home directory itself
+    if cwd == Path.home():
+        return False
+
+    # Don't init in system directories
+    for unsafe in UNSAFE_DIRS:
+        if cwd_str == unsafe or cwd_str.startswith(unsafe + '/'):
+            # Allow subdirectories of /tmp and home
+            if unsafe == '/tmp' or cwd_str.startswith(str(Path.home())):
+                continue
+            return False
+
+    return True
+
+
+def has_code_files() -> bool:
+    """Check if directory has indexable code files."""
+    config = get_config()
+    extensions = get_extensions(config)
+    skip_dirs = get_skip_dirs(config)
+
+    for item in Path.cwd().iterdir():
+        if item.is_file() and item.suffix in extensions:
+            return True
+        if item.is_dir() and item.name not in skip_dirs:
+            # Check one level deep
+            for subitem in item.iterdir():
+                if subitem.is_file() and subitem.suffix in extensions:
+                    return True
+    return False
+
+
+def should_auto_init(command: str) -> bool:
+    """Check if we should auto-initialize for this command."""
+    # Commands that don't need auto-init
+    no_init_commands = {'init', 'uninstall', 'help'}
+    if command in no_init_commands:
+        return False
+
+    # Already initialized
+    if get_brain_dir().exists():
+        return False
+
+    # Safety checks
+    if not is_safe_directory():
+        return False
+
+    # Must have code files
+    if not has_code_files():
+        return False
+
+    return True
+
+
+def auto_init(args) -> bool:
+    """Perform automatic initialization. Returns True if successful."""
+    print(f"\n{info('📂 No twin-mind setup detected in this project.')}")
+    print(f"   {info('Auto-initializing...')}")
+
+    try:
+        # Create directory
+        ensure_brain_dir()
+
+        # Create stores
+        code_path = get_code_path()
+        memory_path = get_memory_path()
+
+        with memvid_sdk.use('basic', str(code_path), mode='create') as mem:
+            pass
+        print(f"   {success('✓')} Created {code_path.name}")
+
+        with memvid_sdk.use('basic', str(memory_path), mode='create') as mem:
+            # Add init memory
+            mem.put(
+                title="Twin-Mind Initialized",
+                text=f"Twin-Mind auto-initialized on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                uri="twin-mind://system/init",
+                tags=["system", f"timestamp:{datetime.now().isoformat()}"]
+            )
+        print(f"   {success('✓')} Created {memory_path.name}")
+
+        # Index codebase
+        print(f"   {info('📂 Indexing codebase...')}")
+        config = get_config()
+
+        # Quick index
+        files = collect_files(config)
+        if files:
+            with memvid_sdk.use('basic', str(code_path), mode='open') as mem:
+                for file_path in files:
+                    try:
+                        content = file_path.read_text(encoding='utf-8', errors='replace')
+                        rel_path = str(file_path.relative_to(Path.cwd()))
+                        lang = detect_language(file_path.suffix)
+                        mem.put(
+                            title=rel_path,
+                            text=content,
+                            uri=f"file://{rel_path}",
+                            tags=[lang, file_path.suffix.lstrip('.')]
+                        )
+                    except Exception:
+                        pass
+
+            # Save index state
+            if is_git_repo():
+                save_index_state(get_current_commit() or "", len(files))
+
+        print(f"   {success('✓')} Indexed {len(files)} files")
+        print(f"   {success('✅ Ready!')}\n")
+        return True
+
+    except Exception as e:
+        print(f"   {error(f'❌ Auto-init failed: {e}')}")
+        return False
+
+
 def detect_language(ext: str) -> str:
     lang_map = {
         '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
@@ -1500,6 +1632,96 @@ def cmd_reindex(args):
     cmd_index(args)
 
 
+def cmd_uninstall(args):
+    """Uninstall twin-mind from the system."""
+    import shutil
+
+    install_dir = Path.home() / '.twin-mind'
+    skill_dir = Path.home() / '.claude' / 'skills' / 'twin-mind'
+
+    print(f"\n🗑️  Twin-Mind Uninstaller")
+    print("=" * 40)
+
+    items_to_remove = []
+    if install_dir.exists():
+        items_to_remove.append(('Installation directory', install_dir))
+    if skill_dir.exists():
+        items_to_remove.append(('Skill directory', skill_dir))
+
+    if not items_to_remove:
+        print("Nothing to uninstall - twin-mind is not installed globally.")
+        print("\nTo remove from current project: rm -rf .claude/")
+        return
+
+    print("\nWill remove:")
+    for name, path in items_to_remove:
+        print(f"  - {name}: {path}")
+
+    # Check for alias in shell config
+    shell_configs = [
+        Path.home() / '.zshrc',
+        Path.home() / '.bashrc',
+        Path.home() / '.bash_profile',
+        Path.home() / '.profile'
+    ]
+
+    alias_found_in = []
+    for config in shell_configs:
+        if config.exists():
+            try:
+                content = config.read_text()
+                if 'alias twin-mind=' in content:
+                    alias_found_in.append(config)
+            except Exception:
+                pass
+
+    if alias_found_in:
+        print(f"\nWill remove alias from:")
+        for config in alias_found_in:
+            print(f"  - {config}")
+
+    if not getattr(args, 'force', False):
+        if not confirm("\n⚠️  Proceed with uninstall?"):
+            print("Cancelled.")
+            return
+
+    # Remove directories
+    for name, path in items_to_remove:
+        try:
+            shutil.rmtree(path)
+            print(f"  {success('✓')} Removed {path}")
+        except Exception as e:
+            print(f"  {error(f'✗ Failed to remove {path}: {e}')}")
+
+    # Remove alias from shell configs
+    for config in alias_found_in:
+        try:
+            content = config.read_text()
+            lines = content.split('\n')
+            new_lines = []
+            skip_next = False
+            for line in lines:
+                # Skip the alias line and the comment before it
+                if 'Twin-Mind - AI coding assistant' in line:
+                    skip_next = True
+                    continue
+                if skip_next and 'alias twin-mind=' in line:
+                    skip_next = False
+                    continue
+                if 'alias twin-mind=' in line:
+                    continue
+                new_lines.append(line)
+            config.write_text('\n'.join(new_lines))
+            print(f"  {success('✓')} Removed alias from {config}")
+        except Exception as e:
+            print(f"  {warning(f'⚠ Could not update {config}: {e}')}")
+
+    print(f"\n{success('✅ Twin-mind uninstalled.')}")
+    print("\nNote: Project-specific .claude/ directories are preserved.")
+    print("To remove them: rm -rf /path/to/project/.claude/")
+
+
+
 # === Main ===
 
 def main():
@@ -1603,6 +1825,10 @@ Repository: https://github.com/your-username/twin-mind
     p_export.add_argument('--format', '-f', choices=['md', 'json'], default='md', help='Output format')
     p_export.add_argument('--output', '-o', help='Output file (default: stdout)')
 
+    # uninstall
+    p_uninstall = subparsers.add_parser('uninstall', help='Remove twin-mind installation')
+    p_uninstall.add_argument('--force', '-f', action='store_true', help='Skip confirmation')
+
     args = parser.parse_args()
 
     # Handle --no-color flag globally
@@ -1626,8 +1852,14 @@ Repository: https://github.com/your-username/twin-mind
         'reset': cmd_reset,
         'prune': cmd_prune,
         'context': cmd_context,
-        'export': cmd_export
+        'export': cmd_export,
+        'uninstall': cmd_uninstall
     }
+
+    # Auto-init for commands that need it
+    if should_auto_init(args.command):
+        if not auto_init(args):
+            sys.exit(1)
 
     commands[args.command](args)
 
