@@ -30,10 +30,12 @@ import re
 import json
 
 try:
-    from memvid_sdk import Memvid, PutOptions, SearchRequest
+    import memvid_sdk
     MEMVID_AVAILABLE = True
-except ImportError:
+    MEMVID_IMPORT_ERROR = None
+except ImportError as e:
     MEMVID_AVAILABLE = False
+    MEMVID_IMPORT_ERROR = str(e)
 
 
 # === Output Helpers ===
@@ -100,7 +102,7 @@ VERSION = "1.1.0"
 CODE_EXTENSIONS = {
     '.py', '.js', '.ts', '.tsx', '.jsx', '.java', '.kt', '.scala',
     '.go', '.rs', '.c', '.cpp', '.h', '.hpp', '.cs', '.rb', '.php',
-    '.swift', '.sql', '.sh', '.bash', '.yaml', '.yml', '.json', 
+    '.swift', '.sql', '.sh', '.bash', '.yaml', '.yml', '.json',
     '.toml', '.xml', '.html', '.css', '.scss', '.md', '.txt', '.vue',
     '.svelte', '.astro', '.prisma', '.graphql', '.proto', '.tf'
 }
@@ -136,8 +138,9 @@ DEFAULT_CONFIG = {
 def parse_size(size_str: str) -> int:
     """Parse size string like '500KB' to bytes."""
     size_str = str(size_str).strip().upper()
-    multipliers = {'B': 1, 'KB': 1024, 'MB': 1024*1024, 'GB': 1024**3}
-    for suffix, mult in multipliers.items():
+    # Check longer suffixes first to avoid 'B' matching before 'KB'
+    multipliers = [('GB', 1024**3), ('MB', 1024*1024), ('KB', 1024), ('B', 1)]
+    for suffix, mult in multipliers:
         if size_str.endswith(suffix):
             return int(float(size_str[:-len(suffix)]) * mult)
     return int(size_str)
@@ -193,6 +196,48 @@ def get_skip_dirs(config: dict) -> set:
     for d in config["skip_dirs"]:
         skip.add(d)
     return skip
+
+
+def parse_timeline_entry(entry: dict) -> dict:
+    """Parse a timeline entry's preview field into structured data.
+
+    Timeline entries have format:
+        preview: "text content\ntitle: Title\nuri: URI\ntags: tag1,tag2"
+
+    Returns dict with: title, text, uri, tags
+    """
+    preview = entry.get('preview', '')
+    uri = entry.get('uri', '')
+
+    # Default values
+    result = {
+        'title': 'untitled',
+        'text': preview,
+        'uri': uri or '',
+        'tags': [],
+        'timestamp': entry.get('timestamp', 0),
+        'frame_id': entry.get('frame_id', '')
+    }
+
+    # Parse embedded metadata from preview
+    lines = preview.split('\n')
+    text_lines = []
+
+    for line in lines:
+        if line.startswith('title: '):
+            result['title'] = line[7:]
+        elif line.startswith('uri: '):
+            if not result['uri']:
+                result['uri'] = line[5:]
+        elif line.startswith('tags: '):
+            tags_str = line[6:]
+            if tags_str:
+                result['tags'] = [t.strip() for t in tags_str.split(',') if t.strip()]
+        else:
+            text_lines.append(line)
+
+    result['text'] = '\n'.join(text_lines).strip()
+    return result
 
 
 # Global config (loaded once)
@@ -468,7 +513,9 @@ def check_stale_index(quiet: bool = False) -> bool:
 
 def check_memvid():
     if not MEMVID_AVAILABLE:
-        print("❌ memvid-sdk not installed.")
+        print("❌ memvid-sdk not installed or import failed.")
+        print(f"   Python: {sys.executable}")
+        print(f"   Error: {MEMVID_IMPORT_ERROR}")
         print("   Run: pip install memvid-sdk --break-system-packages")
         sys.exit(1)
 
@@ -535,13 +582,13 @@ def print_banner():
 def cmd_init(args):
     """Initialize twin-mind (both stores)."""
     check_memvid()
-    
+
     if args.banner:
         print_banner()
-    
+
     code_path = get_code_path()
     memory_path = get_memory_path()
-    
+
     if code_path.exists() or memory_path.exists():
         print("⚠️  Twin-Mind already exists:")
         if code_path.exists():
@@ -550,31 +597,27 @@ def cmd_init(args):
             print(f"   📝 {memory_path}")
         if not confirm("   Reinitialize?"):
             return
-    
+
     ensure_brain_dir()
-    
+
     # Initialize code store
     if code_path.exists():
         code_path.unlink()
-    code_mem = Memvid.create(str(code_path))
-    code_mem.commit()
-    
+    with memvid_sdk.use('basic', str(code_path), mode='create') as code_mem:
+        pass  # Just create empty store
+
     # Initialize memory store with welcome message
     if memory_path.exists():
         memory_path.unlink()
-    memory_mem = Memvid.create(str(memory_path))
-    
-    opts = PutOptions.builder() \
-        .title("Twin-Mind Initialized") \
-        .uri("twin-mind://system/init") \
-        .tag("category", "system") \
-        .tag("timestamp", datetime.now().isoformat()) \
-        .build()
-    
-    init_msg = f"Twin-Mind initialized on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    memory_mem.put_bytes_with_options(init_msg.encode('utf-8'), opts)
-    memory_mem.commit()
-    
+    with memvid_sdk.use('basic', str(memory_path), mode='create') as memory_mem:
+        init_msg = f"Twin-Mind initialized on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        memory_mem.put(
+            title="Twin-Mind Initialized",
+            text=init_msg,
+            uri="twin-mind://system/init",
+            tags=["system", f"timestamp:{datetime.now().isoformat()}"]
+        )
+
     print(f"""
 ✅ Twin-Mind initialized!
 
@@ -654,23 +697,20 @@ def cmd_index(args):
                 print(f"   ... and {len(files) - 10} more")
         return
 
-    # Open or create store
-    if code_path.exists():
-        if not incremental:
-            print(info("📝 Appending to existing code index..."))
-            print("   (Use --fresh for clean reindex)")
-        mem = Memvid.open(str(code_path))
-    else:
-        mem = Memvid.create(str(code_path))
-
     # Use file locking for writes
     with FileLock(code_path):
-        if incremental:
-            indexed = index_files_incremental(mem, changed_files, config, args)
-        else:
-            indexed = index_files_full(mem, config, args)
+        # Determine mode
+        mode = 'open' if code_path.exists() else 'create'
 
-        mem.commit()
+        if code_path.exists() and not incremental:
+            print(info("📝 Appending to existing code index..."))
+            print("   (Use --fresh for clean reindex)")
+
+        with memvid_sdk.use('basic', str(code_path), mode=mode) as mem:
+            if incremental:
+                indexed = index_files_incremental(mem, changed_files, config, args)
+            else:
+                indexed = index_files_full(mem, config, args)
 
     # Save state
     current_commit = get_current_commit()
@@ -723,15 +763,16 @@ def index_files_full(mem, config: dict, args) -> int:
                 progress.update()
                 continue
 
-            opts = PutOptions.builder() \
-                .title(str(relative_path)) \
-                .uri(f"file://{relative_path}") \
-                .tag("extension", filepath.suffix) \
-                .tag("language", detect_language(filepath.suffix)) \
-                .tag("indexed_at", datetime.now().isoformat()) \
-                .build()
-
-            mem.put_bytes_with_options(content.encode('utf-8'), opts)
+            mem.put(
+                title=str(relative_path),
+                text=content,
+                uri=f"file://{relative_path}",
+                tags=[
+                    f"extension:{filepath.suffix}",
+                    f"language:{detect_language(filepath.suffix)}",
+                    f"indexed_at:{datetime.now().isoformat()}"
+                ]
+            )
             indexed += 1
 
             if verbose:
@@ -773,15 +814,16 @@ def index_files_incremental(mem, changed_files: list[str], config: dict, args) -
             if not content.strip():
                 continue
 
-            opts = PutOptions.builder() \
-                .title(rel_path) \
-                .uri(f"file://{rel_path}") \
-                .tag("extension", filepath.suffix) \
-                .tag("language", detect_language(filepath.suffix)) \
-                .tag("indexed_at", datetime.now().isoformat()) \
-                .build()
-
-            mem.put_bytes_with_options(content.encode('utf-8'), opts)
+            mem.put(
+                title=rel_path,
+                text=content,
+                uri=f"file://{rel_path}",
+                tags=[
+                    f"extension:{filepath.suffix}",
+                    f"language:{detect_language(filepath.suffix)}",
+                    f"indexed_at:{datetime.now().isoformat()}"
+                ]
+            )
             indexed += 1
 
             if verbose:
@@ -797,35 +839,33 @@ def index_files_incremental(mem, changed_files: list[str], config: dict, args) -
 def cmd_remember(args):
     """Store a memory/decision/insight."""
     check_memvid()
-    
+
     memory_path = get_memory_path()
-    
+
     if not memory_path.exists():
         print("❌ Twin-Mind not initialized. Run: twin-mind init")
         sys.exit(1)
-    
-    mem = Memvid.open(str(memory_path))
-    
+
     # Create title from message
     title = args.message[:50]
     if len(args.message) > 50:
         title += "..."
-    
-    # Build options
-    builder = PutOptions.builder() \
-        .title(title) \
-        .uri(f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}") \
-        .tag("timestamp", datetime.now().isoformat())
-    
+
+    # Build tags
+    tags = [f"timestamp:{datetime.now().isoformat()}"]
     if args.tag:
-        builder.tag("category", args.tag)
+        tags.append(f"category:{args.tag}")
     else:
-        builder.tag("category", "general")
-    
-    opts = builder.build()
-    mem.put_bytes_with_options(args.message.encode('utf-8'), opts)
-    mem.commit()
-    
+        tags.append("category:general")
+
+    with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+        mem.put(
+            title=title,
+            text=args.message,
+            uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            tags=tags
+        )
+
     tag_str = f" [{args.tag}]" if args.tag else ""
     print(f"✅ Remembered{tag_str}: {title}")
 
@@ -856,30 +896,20 @@ def cmd_search(args):
 
     # Search code
     if args.scope in ('code', 'all') and code_path.exists():
-        mem = Memvid.open(str(code_path))
-        req = SearchRequest(
-            query=args.query,
-            top_k=args.top_k,
-            snippet_chars=snippet_chars
-        )
-        response = mem.search(req)
-        for hit in response.hits:
-            results.append(('code', hit))
+        with memvid_sdk.use('basic', str(code_path), mode='open') as mem:
+            response = mem.find(args.query, k=args.top_k, snippet_chars=snippet_chars)
+            for hit in response.get('hits', []):
+                results.append(('code', hit))
 
     # Search memory
     if args.scope in ('memory', 'all') and memory_path.exists():
-        mem = Memvid.open(str(memory_path))
-        req = SearchRequest(
-            query=args.query,
-            top_k=args.top_k,
-            snippet_chars=snippet_chars
-        )
-        response = mem.search(req)
-        for hit in response.hits:
-            results.append(('memory', hit))
+        with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+            response = mem.find(args.query, k=args.top_k, snippet_chars=snippet_chars)
+            for hit in response.get('hits', []):
+                results.append(('memory', hit))
 
     # Sort by score and limit
-    results.sort(key=lambda x: x[1].score, reverse=True)
+    results.sort(key=lambda x: x[1].get('score', 0), reverse=True)
     results = results[:args.top_k]
 
     if not results:
@@ -899,14 +929,15 @@ def cmd_search(args):
         for source, hit in results:
             result_obj = {
                 "source": source,
-                "file": hit.title,
-                "score": hit.score,
-                "uri": hit.uri,
-                "snippet": hit.text.strip()
+                "file": hit.get('title', ''),
+                "score": hit.get('score', 0),
+                "uri": hit.get('uri', ''),
+                "snippet": hit.get('text', '').strip()
             }
             # Try to extract line numbers from URI for code
-            if source == 'code' and hit.uri and hit.uri.startswith('twin-mind://code/'):
-                result_obj["file_path"] = hit.uri.replace('twin-mind://code/', '')
+            uri = hit.get('uri', '')
+            if source == 'code' and uri and uri.startswith('twin-mind://code/'):
+                result_obj["file_path"] = uri.replace('twin-mind://code/', '')
             output["results"].append(result_obj)
         print(json.dumps(output, indent=2))
         return
@@ -916,18 +947,19 @@ def cmd_search(args):
 
     for i, (source, hit) in enumerate(results, 1):
         icon = "📄" if source == 'code' else "📝"
-        title = hit.title or "untitled"
+        title = hit.get('title', 'untitled')
 
         print(f"\n{icon} [{i}] {title}")
-        print(f"   Score: {hit.score:.3f} | Source: {source}")
+        print(f"   Score: {hit.get('score', 0):.3f} | Source: {source}")
         print("-" * 40)
 
         # Get content to display
-        content = hit.text.strip()
+        content = hit.get('text', '').strip()
 
         # For code results with --full flag, try to read actual file
-        if source == 'code' and show_full and hit.uri:
-            file_path = hit.uri.replace('twin-mind://code/', '')
+        uri = hit.get('uri', '')
+        if source == 'code' and show_full and uri:
+            file_path = uri.replace('file://', '')
             if Path(file_path).exists():
                 try:
                     content = Path(file_path).read_text()
@@ -969,69 +1001,81 @@ def cmd_ask(args):
 def cmd_recent(args):
     """Show recent memories."""
     check_memvid()
-    
+
     memory_path = get_memory_path()
-    
+
     if not memory_path.exists():
         print("❌ No memory store. Run: twin-mind init")
         sys.exit(1)
-    
-    mem = Memvid.open(str(memory_path))
-    
-    req = SearchRequest(
-        query="*",
-        top_k=args.n,
-        snippet_chars=200
-    )
-    response = mem.search(req)
-    
-    if not response.hits:
+
+    with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+        entries = mem.timeline()
+        # Sort by timestamp descending (most recent first) and limit
+        entries = sorted(entries, key=lambda x: x.get('timestamp', 0), reverse=True)[:args.n]
+
+    if not entries:
         print("📭 No memories yet. Use: twin-mind remember <message>")
         return
-    
-    print(f"\n📝 Recent Memories ({len(response.hits)})\n")
+
+    print(f"\n📝 Recent Memories ({len(entries)})\n")
     print("=" * 60)
-    
-    for i, hit in enumerate(response.hits, 1):
-        title = hit.title or "untitled"
+
+    for i, entry in enumerate(entries, 1):
+        # Extract title from preview (format: "text\ntitle: X\nuri: Y\ntags: Z")
+        preview = entry.get('preview', '')
+        title = 'untitled'
+        text = preview
+        if '\ntitle: ' in preview:
+            parts = preview.split('\ntitle: ')
+            text = parts[0]
+            title_part = parts[1].split('\n')[0] if len(parts) > 1 else ''
+            title = title_part or 'untitled'
         print(f"\n[{i}] {title}")
-        print(f"    {hit.text.strip()[:150]}")
+        print(f"    {text[:150]}")
 
 
 def cmd_stats(args):
     """Show twin-mind statistics."""
     check_memvid()
-    
+
     code_path = get_code_path()
     memory_path = get_memory_path()
-    
+
     print(f"\n🧠 Twin-Mind Stats")
     print("=" * 45)
-    
+
     # Code stats
     if code_path.exists():
         code_size = format_size(code_path.stat().st_size)
-        mem = Memvid.open(str(code_path))
-        code_count = len(mem.search(SearchRequest(query="*", top_k=10000)).hits)
+        with memvid_sdk.use('basic', str(code_path), mode='open') as mem:
+            stats = mem.stats()
+            frame_count = stats.get('frame_count', 0)
+
+        # Get actual file count from index state
+        index_state = load_index_state()
+        file_count = index_state.get('file_count', '?') if index_state else '?'
+
         print(f"📄 Code Store:   {code_path}")
         print(f"   Size:         {code_size}")
-        print(f"   Files:        {code_count}")
+        print(f"   Files:        {file_count}")
+        print(f"   Frames:       {frame_count}")
     else:
         print(f"📄 Code Store:   Not created")
-    
+
     print()
-    
+
     # Memory stats
     if memory_path.exists():
         mem_size = format_size(memory_path.stat().st_size)
-        mem = Memvid.open(str(memory_path))
-        mem_count = len(mem.search(SearchRequest(query="*", top_k=10000)).hits)
+        with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+            stats = mem.stats()
+            mem_count = stats.get('frame_count', 0)
         print(f"📝 Memory Store: {memory_path}")
         print(f"   Size:         {mem_size}")
         print(f"   Memories:     {mem_count}")
     else:
         print(f"📝 Memory Store: Not created")
-    
+
     print("=" * 45)
 
 
@@ -1055,8 +1099,8 @@ def cmd_reset(args):
                 print(f"   Would reset code store ({size})")
             elif args.force or confirm(f"⚠️  Delete code store ({size})?"):
                 code_path.unlink()
-                mem = Memvid.create(str(code_path))
-                mem.commit()
+                with memvid_sdk.use('basic', str(code_path), mode='create') as mem:
+                    pass  # Just create empty store
                 print(success("✅ Code store reset"))
             else:
                 print("   Skipped code store")
@@ -1070,18 +1114,13 @@ def cmd_reset(args):
                 print(f"   Would reset memory store ({size})")
             elif args.force or confirm(f"⚠️  Delete memory store ({size})? This is PERMANENT!"):
                 memory_path.unlink()
-                mem = Memvid.create(str(memory_path))
-                opts = PutOptions.builder() \
-                    .title("Memory Reset") \
-                    .uri("twin-mind://system/reset") \
-                    .tag("category", "system") \
-                    .tag("timestamp", datetime.now().isoformat()) \
-                    .build()
-                mem.put_bytes_with_options(
-                    f"Memory reset on {datetime.now().strftime('%Y-%m-%d %H:%M')}".encode('utf-8'),
-                    opts
-                )
-                mem.commit()
+                with memvid_sdk.use('basic', str(memory_path), mode='create') as mem:
+                    mem.put(
+                        title="Memory Reset",
+                        text=f"Memory reset on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                        uri="twin-mind://system/reset",
+                        tags=["category:system", f"timestamp:{datetime.now().isoformat()}"]
+                    )
                 print(success("✅ Memory store reset"))
             else:
                 print("   Skipped memory store")
@@ -1124,12 +1163,11 @@ def cmd_prune(args):
         print(error("❌ Specify --before DATE or --tag TAG to prune"))
         sys.exit(1)
 
-    # Load all memories
-    mem = Memvid.open(str(memory_path))
-    req = SearchRequest(query="*", top_k=100000, snippet_chars=10000)
-    response = mem.search(req)
+    # Load all memories using timeline
+    with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+        all_entries = mem.timeline()
 
-    if not response.hits:
+    if not all_entries:
         print("📭 No memories to prune")
         return
 
@@ -1137,20 +1175,22 @@ def cmd_prune(args):
     to_remove = []
     to_keep = []
 
-    for hit in response.hits:
+    for entry in all_entries:
         should_remove = False
+        uri = entry.get('uri', '')
+        preview = entry.get('preview', '')
 
         # Skip system entries - always keep
-        if hit.uri and "twin-mind://system" in hit.uri:
-            to_keep.append(hit)
+        if uri and "twin-mind://system" in uri:
+            to_keep.append(entry)
             continue
 
         # Check date filter
-        if cutoff and hit.uri:
+        if cutoff and uri:
             try:
                 # URI format: twin-mind://memory/YYYYMMDD_HHMMSS
-                if "twin-mind://memory/" in hit.uri:
-                    date_part = hit.uri.split("/")[-1]
+                if "twin-mind://memory/" in uri:
+                    date_part = uri.split("/")[-1]
                     mem_date = datetime.strptime(date_part, "%Y%m%d_%H%M%S")
                     if mem_date < cutoff:
                         should_remove = True
@@ -1160,15 +1200,17 @@ def cmd_prune(args):
         # Check tag filter
         if args.tag:
             tag_lower = args.tag.lower()
-            title_lower = (hit.title or "").lower()
-            text_lower = hit.text.lower() if hit.text else ""
-            if tag_lower in title_lower or f"[{tag_lower}]" in text_lower:
+            # Extract title from preview
+            title = ''
+            if '\ntitle: ' in preview:
+                title = preview.split('\ntitle: ')[1].split('\n')[0]
+            if tag_lower in title.lower() or f"[{tag_lower}]" in preview.lower():
                 should_remove = True
 
         if should_remove:
-            to_remove.append(hit)
+            to_remove.append(entry)
         else:
-            to_keep.append(hit)
+            to_keep.append(entry)
 
     if not to_remove:
         print(success("✅ No memories match prune criteria"))
@@ -1177,8 +1219,9 @@ def cmd_prune(args):
     # Show preview
     print(f"\n🔍 Prune preview:")
     print(f"   Matching: {len(to_remove)} memories")
-    for hit in to_remove[:5]:
-        title = (hit.title or "untitled")[:50]
+    for entry in to_remove[:5]:
+        parsed = parse_timeline_entry(entry)
+        title = parsed['title'][:50]
         print(f"   - \"{title}\"")
     if len(to_remove) > 5:
         print(f"   ... and {len(to_remove) - 5} more")
@@ -1202,16 +1245,15 @@ def cmd_prune(args):
 
     # Rebuild with kept memories
     memory_path.unlink()
-    new_mem = Memvid.create(str(memory_path))
-
-    for hit in to_keep:
-        opts = PutOptions.builder() \
-            .title(hit.title or "untitled") \
-            .uri(hit.uri or f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}") \
-            .build()
-        new_mem.put_bytes_with_options(hit.text.encode('utf-8'), opts)
-
-    new_mem.commit()
+    with memvid_sdk.use('basic', str(memory_path), mode='create') as new_mem:
+        for entry in to_keep:
+            parsed = parse_timeline_entry(entry)
+            new_mem.put(
+                title=parsed['title'],
+                text=parsed['text'],
+                uri=parsed['uri'] or f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                tags=parsed['tags']
+            )
 
     print(success(f"✅ Pruned {len(to_remove)} memories ({len(to_keep)} remaining)"))
 
@@ -1232,17 +1274,15 @@ def cmd_context(args):
 
     # Search code
     if code_path.exists():
-        mem = Memvid.open(str(code_path))
-        req = SearchRequest(query=query, top_k=5, snippet_chars=2000)
-        response = mem.search(req)
-        code_results = response.hits[:3]  # Top 3 code results
+        with memvid_sdk.use('basic', str(code_path), mode='open') as mem:
+            response = mem.find(query, k=5, snippet_chars=2000)
+            code_results = response.get('hits', [])[:3]  # Top 3 code results
 
     # Search memory
     if memory_path.exists():
-        mem = Memvid.open(str(memory_path))
-        req = SearchRequest(query=query, top_k=5, snippet_chars=1000)
-        response = mem.search(req)
-        memory_results = response.hits[:3]  # Top 3 memory results
+        with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+            response = mem.find(query, k=5, snippet_chars=1000)
+            memory_results = response.get('hits', [])[:3]  # Top 3 memory results
 
     # Build context document
     context_parts = []
@@ -1255,8 +1295,9 @@ def cmd_context(args):
         for hit in code_results:
             if total_chars >= char_limit:
                 break
-            file_name = hit.title or "file"
-            code_block = f"### {file_name}\n```\n{hit.text.strip()[:1500]}\n```\n"
+            file_name = hit.get('title', 'file')
+            text = hit.get('text', '').strip()[:1500]
+            code_block = f"### {file_name}\n```\n{text}\n```\n"
             context_parts.append(code_block)
             total_chars += len(code_block)
 
@@ -1266,8 +1307,9 @@ def cmd_context(args):
         for hit in memory_results:
             if total_chars >= char_limit:
                 break
-            title = hit.title or "Memory"
-            memory_block = f"- **{title}**: {hit.text.strip()[:500]}\n"
+            title = hit.get('title', 'Memory')
+            text = hit.get('text', '').strip()[:500]
+            memory_block = f"- **{title}**: {text}\n"
             context_parts.append(memory_block)
             total_chars += len(memory_block)
 
@@ -1296,57 +1338,79 @@ def cmd_context(args):
 def cmd_export(args):
     """Export memories to readable format."""
     check_memvid()
-    
+
     memory_path = get_memory_path()
-    
+
     if not memory_path.exists():
         print("❌ No memory store. Run: twin-mind init")
         sys.exit(1)
-    
-    mem = Memvid.open(str(memory_path))
-    
-    req = SearchRequest(query="*", top_k=10000, snippet_chars=5000)
-    response = mem.search(req)
-    
-    if not response.hits:
+
+    # Get all memories using timeline, then fetch full frame data
+    memories = []
+    with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+        entries = mem.timeline()
+        for entry in entries:
+            # Parse text from preview (before metadata lines)
+            parsed = parse_timeline_entry(entry)
+
+            # Get full metadata from frame() for accurate title/tags
+            uri = entry.get('uri', '')
+            if uri:
+                try:
+                    frame = mem.frame(uri)
+                    parsed['title'] = frame.get('title', parsed['title'])
+                    parsed['tags'] = frame.get('tags', parsed['tags'])
+                    parsed['uri'] = frame.get('uri', parsed['uri'])
+                except Exception:
+                    pass  # Use parsed values if frame lookup fails
+
+            memories.append(parsed)
+
+    if not memories:
         print("📭 No memories to export")
         return
-    
+
     if args.format == 'json':
         output = []
-        for hit in response.hits:
+        for mem_data in memories:
             output.append({
-                "title": hit.title,
-                "content": hit.text,
-                "uri": hit.uri,
-                "score": hit.score
+                "title": mem_data['title'],
+                "content": mem_data['text'],
+                "uri": mem_data['uri'],
+                "tags": mem_data['tags']
             })
         result = json.dumps(output, indent=2, ensure_ascii=False)
     else:  # markdown
         lines = ["# Twin-Mind Memory Export", ""]
         lines.append(f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-        lines.append(f"Total memories: {len(response.hits)}")
+        lines.append(f"Total memories: {len(memories)}")
         lines.append("")
         lines.append("---")
         lines.append("")
-        
-        for i, hit in enumerate(response.hits, 1):
-            lines.append(f"## {i}. {hit.title or 'Untitled'}")
+
+        for i, mem_data in enumerate(memories, 1):
+            title = mem_data['title']
+            text = mem_data['text'].strip()
+            uri = mem_data['uri']
+            tags = mem_data['tags']
+            lines.append(f"## {i}. {title}")
             lines.append("")
-            lines.append(hit.text.strip())
+            lines.append(text)
             lines.append("")
-            if hit.uri:
-                lines.append(f"*URI: {hit.uri}*")
+            if tags:
+                lines.append(f"*Tags: {', '.join(tags)}*")
+            if uri:
+                lines.append(f"*URI: {uri}*")
             lines.append("")
             lines.append("---")
             lines.append("")
-        
+
         result = "\n".join(lines)
-    
+
     # Output to file or stdout
     if args.output:
         Path(args.output).write_text(result, encoding='utf-8')
-        print(f"✅ Exported {len(response.hits)} memories to {args.output}")
+        print(f"✅ Exported {len(memories)} memories to {args.output}")
     else:
         print(result)
 
@@ -1369,13 +1433,18 @@ def cmd_status(args):
     if code_path.exists():
         code_size = format_size(code_path.stat().st_size)
         try:
-            mem = Memvid.open(str(code_path))
-            code_count = len(mem.search(SearchRequest(query="*", top_k=10000)).hits)
+            with memvid_sdk.use('basic', str(code_path), mode='open') as mem:
+                stats = mem.stats()
+                frame_count = stats.get('frame_count', 0)
         except Exception:
-            code_count = "?"
+            frame_count = "?"
+
+        # Get actual file count from index state
+        index_state = load_index_state()
+        file_count = index_state.get('file_count', '?') if index_state else '?'
 
         age = get_index_age() or "unknown"
-        print(f"📄 Code     {code_size:>8} │ {code_count} files │ indexed {age}")
+        print(f"📄 Code     {code_size:>8} │ {file_count} files, {frame_count} frames │ indexed {age}")
     else:
         print(f"📄 Code     {warning('not created')}")
 
@@ -1383,8 +1452,9 @@ def cmd_status(args):
     if memory_path.exists():
         mem_size = format_size(memory_path.stat().st_size)
         try:
-            mem = Memvid.open(str(memory_path))
-            mem_count = len(mem.search(SearchRequest(query="*", top_k=10000)).hits)
+            with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+                stats = mem.stats()
+                mem_count = stats.get('frame_count', 0)
         except Exception:
             mem_count = "?"
         print(f"📝 Memory   {mem_size:>8} │ {mem_count} entries")
@@ -1451,16 +1521,16 @@ Examples:
 Repository: https://github.com/your-username/twin-mind
 """
     )
-    
+
     parser.add_argument('--version', '-V', action='version', version=f'twin-mind {VERSION}')
     parser.add_argument('--no-color', action='store_true', help='Disable colored output')
 
     subparsers = parser.add_subparsers(dest='command', help='Commands')
-    
+
     # init
     p_init = subparsers.add_parser('init', help='Initialize twin-mind')
     p_init.add_argument('--banner', '-b', action='store_true', help='Show ASCII banner')
-    
+
     # index
     p_index = subparsers.add_parser('index', help='Index codebase')
     p_index.add_argument('--fresh', '-f', action='store_true',
@@ -1471,12 +1541,12 @@ Repository: https://github.com/your-username/twin-mind
                          help='Same as --status')
     p_index.add_argument('--verbose', '-v', action='store_true',
                          help='Show each file as it is processed')
-    
+
     # remember
     p_remember = subparsers.add_parser('remember', help='Store a memory')
     p_remember.add_argument('message', help='What to remember')
     p_remember.add_argument('--tag', '-t', help='Category tag (arch, bugfix, feature, etc.)')
-    
+
     # search
     p_search = subparsers.add_parser('search', help='Search twin-mind')
     p_search.add_argument('query', help='Search query')
@@ -1488,15 +1558,15 @@ Repository: https://github.com/your-username/twin-mind
                           help='Show N lines before/after each match')
     p_search.add_argument('--full', action='store_true',
                           help='Show full file content for code matches')
-    
+
     # ask
     p_ask = subparsers.add_parser('ask', help='Ask a question')
     p_ask.add_argument('question', help='Your question')
-    
+
     # recent
     p_recent = subparsers.add_parser('recent', help='Show recent memories')
     p_recent.add_argument('--n', type=int, default=10, help='Number to show')
-    
+
     # stats
     subparsers.add_parser('stats', help='Show twin-mind statistics')
 
@@ -1512,7 +1582,7 @@ Repository: https://github.com/your-username/twin-mind
     p_reset.add_argument('target', choices=['code', 'memory', 'all'], help='What to reset')
     p_reset.add_argument('--force', '-f', action='store_true', help='Skip confirmation')
     p_reset.add_argument('--dry-run', action='store_true', help='Preview without executing')
-    
+
     # prune
     p_prune = subparsers.add_parser('prune', help='Prune old memories')
     p_prune.add_argument('target', choices=['memory'], help='What to prune')
@@ -1532,7 +1602,7 @@ Repository: https://github.com/your-username/twin-mind
     p_export = subparsers.add_parser('export', help='Export memories')
     p_export.add_argument('--format', '-f', choices=['md', 'json'], default='md', help='Output format')
     p_export.add_argument('--output', '-o', help='Output file (default: stdout)')
-    
+
     args = parser.parse_args()
 
     # Handle --no-color flag globally
@@ -1542,7 +1612,7 @@ Repository: https://github.com/your-username/twin-mind
     if not args.command:
         parser.print_help()
         sys.exit(1)
-    
+
     commands = {
         'init': cmd_init,
         'index': cmd_index,
@@ -1558,7 +1628,7 @@ Repository: https://github.com/your-username/twin-mind
         'context': cmd_context,
         'export': cmd_export
     }
-    
+
     commands[args.command](args)
 
 
