@@ -1,0 +1,9 @@
+# Twin-Mind gitignore
+#
+# code.mv2 - Generated codebase index, large and regeneratable
+# index_state.json - Machine-specific index metadata
+#
+# memory.mv2 is NOT ignored - it contains valuable decisions to share
+
+code.mv2
+index-state.json
