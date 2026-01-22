@@ -2,6 +2,48 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.3.0] - 2025-01-22
+
+### Added
+- **Upgrade Command**: Self-updating capability
+  - `upgrade` - Check for updates and upgrade if newer version available
+  - `upgrade --check` - Only check for updates, don't install
+  - `upgrade --force` - Skip confirmation prompt
+  - Automatic backup before upgrading
+  - Automatic rollback on failure
+  - Updates twin-mind.py, version.txt, and SKILL.md
+
+## [1.2.0] - 2025-01-22
+
+### Added
+- **Parallel Ingestion**: 3-6x faster indexing with concurrent file reading
+  - Configurable via `index.parallel` (default: true)
+  - `index.parallel_workers` to control concurrency (default: 4)
+  - Automatically activates for >10 files
+
+- **Configurable Embedding Models**: Choose model based on speed/quality tradeoff
+  - `index.embedding_model` setting
+  - Options: `bge-small`, `bge-base`, `gte-large`, `openai`, or null for default
+
+- **Adaptive Retrieval**: Smarter search results
+  - Auto-determines optimal result count based on relevance
+  - Enabled by default via `index.adaptive_retrieval`
+  - `--no-adaptive` flag to disable
+
+- **Deduplication**: Prevent duplicate memories
+  - SimHash-based deduplication
+  - Enabled by default via `memory.dedupe`
+
+- **Doctor Command**: Maintenance and diagnostics
+  - `doctor` - Health check with recommendations
+  - `doctor --vacuum` - Reclaim space from deleted entries
+  - `doctor --rebuild` - Rebuild indexes after heavy pruning
+  - Detects index staleness, bloat, and malformed entries
+
+### Changed
+- New configuration schema with `index.*` and `memory.*` namespaces
+- Improved search with fallback for older memvid versions
+
 ## [1.1.0] - 2025-01-22
 
 ### Added
