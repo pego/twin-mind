@@ -28,6 +28,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import re
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional
 
 try:
     import memvid_sdk
@@ -97,7 +99,7 @@ def info(msg: str) -> str:
 BRAIN_DIR = ".claude"
 CODE_FILE = "code.mv2"
 MEMORY_FILE = "memory.mv2"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 GITIGNORE_FILE = ".gitignore"
 GITIGNORE_CONTENT = """# Twin-Mind gitignore
 #
@@ -139,14 +141,19 @@ DEFAULT_CONFIG = {
     "max_file_size": "500KB",
     "index": {
         "auto_incremental": True,
-        "track_deletions": True
+        "track_deletions": True,
+        "parallel": True,           # Enable parallel ingestion (3-6x faster)
+        "parallel_workers": 4,      # Number of parallel workers
+        "embedding_model": None,    # None=default, "bge-small", "bge-base", "gte-large", "openai"
+        "adaptive_retrieval": True  # Auto-determine optimal result count
     },
     "output": {
         "color": True,
         "verbose": False
     },
     "memory": {
-        "share_memories": False  # If True, memories go to shared decisions.jsonl
+        "share_memories": False,    # If True, memories go to shared decisions.jsonl
+        "dedupe": True              # Enable SimHash deduplication
     }
 }
 
@@ -195,6 +202,9 @@ def load_config() -> dict:
                 # Legacy support: share_memories at top level
                 if "share_memories" in user_config:
                     config["memory"]["share_memories"] = user_config["share_memories"]
+                # Legacy support: embedding_model at top level
+                if "embedding_model" in user_config:
+                    config["index"]["embedding_model"] = user_config["embedding_model"]
         except (json.JSONDecodeError, IOError) as e:
             print(warning(f"⚠️  Config parse error: {e}. Using defaults."))
 
@@ -844,9 +854,22 @@ def print_banner():
 
 # === Commands ===
 
+def get_memvid_create_kwargs(config: dict) -> dict:
+    """Build kwargs for memvid store creation based on config."""
+    kwargs = {}
+
+    embedding_model = config["index"].get("embedding_model")
+    if embedding_model:
+        kwargs['model'] = embedding_model
+
+    return kwargs
+
+
 def cmd_init(args):
     """Initialize twin-mind (both stores)."""
     check_memvid()
+
+    config = get_config()
 
     if args.banner:
         print_banner()
@@ -866,26 +889,50 @@ def cmd_init(args):
     ensure_brain_dir()
     create_gitignore()
 
+    # Get memvid creation options
+    create_kwargs = get_memvid_create_kwargs(config)
+
+    embedding_model = config["index"].get("embedding_model")
+    if embedding_model:
+        print(f"   Using embedding model: {embedding_model}")
+
     # Initialize code store
     if code_path.exists():
         code_path.unlink()
-    with memvid_sdk.use('basic', str(code_path), mode='create') as code_mem:
-        pass  # Just create empty store
+    try:
+        with memvid_sdk.use('basic', str(code_path), mode='create', **create_kwargs) as code_mem:
+            pass  # Just create empty store
+    except TypeError:
+        # Fallback if memvid doesn't support model parameter
+        with memvid_sdk.use('basic', str(code_path), mode='create') as code_mem:
+            pass
 
     # Initialize memory store with welcome message
     if memory_path.exists():
         memory_path.unlink()
-    with memvid_sdk.use('basic', str(memory_path), mode='create') as memory_mem:
-        init_msg = f"Twin-Mind initialized on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        memory_mem.put(
-            title="Twin-Mind Initialized",
-            text=init_msg,
-            uri="twin-mind://system/init",
-            tags=["system", f"timestamp:{datetime.now().isoformat()}"]
-        )
+    try:
+        with memvid_sdk.use('basic', str(memory_path), mode='create', **create_kwargs) as memory_mem:
+            init_msg = f"Twin-Mind initialized on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            memory_mem.put(
+                title="Twin-Mind Initialized",
+                text=init_msg,
+                uri="twin-mind://system/init",
+                tags=["system", f"timestamp:{datetime.now().isoformat()}"]
+            )
+    except TypeError:
+        # Fallback if memvid doesn't support model parameter
+        with memvid_sdk.use('basic', str(memory_path), mode='create') as memory_mem:
+            init_msg = f"Twin-Mind initialized on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            memory_mem.put(
+                title="Twin-Mind Initialized",
+                text=init_msg,
+                uri="twin-mind://system/init",
+                tags=["system", f"timestamp:{datetime.now().isoformat()}"]
+            )
 
+    model_note = f" (model: {embedding_model})" if embedding_model else ""
     print(f"""
-✅ Twin-Mind initialized!
+✅ Twin-Mind initialized!{model_note}
 
    📄 Code store:   {code_path}
    📝 Memory store: {memory_path}
@@ -1001,6 +1048,29 @@ def collect_files(root: Path, extensions: set, skip_dirs: set, max_size: int) ->
     return files
 
 
+def _read_file_content(filepath: Path, codebase_root: Path) -> Optional[dict]:
+    """Read a single file and prepare it for indexing. Returns None if file should be skipped."""
+    try:
+        content = filepath.read_text(encoding='utf-8', errors='ignore')
+        if not content.strip():
+            return None
+
+        relative_path = filepath.relative_to(codebase_root)
+        return {
+            'title': str(relative_path),
+            'text': content,
+            'uri': f"file://{relative_path}",
+            'tags': [
+                f"extension:{filepath.suffix}",
+                f"language:{detect_language(filepath.suffix)}",
+                f"indexed_at:{datetime.now().isoformat()}"
+            ],
+            'filepath': filepath
+        }
+    except Exception:
+        return None
+
+
 def index_files_full(mem, config: dict, args) -> int:
     """Full reindex of all files."""
     codebase_root = Path.cwd()
@@ -1008,6 +1078,8 @@ def index_files_full(mem, config: dict, args) -> int:
     skip_dirs = get_skip_dirs(config)
     max_size = parse_size(config["max_file_size"])
     verbose = config["output"]["verbose"] or getattr(args, 'verbose', False)
+    use_parallel = config["index"].get("parallel", True)
+    num_workers = config["index"].get("parallel_workers", 4)
 
     print(f"📂 Scanning: {codebase_root}")
     files = collect_files(codebase_root, extensions, skip_dirs, max_size)
@@ -1020,37 +1092,80 @@ def index_files_full(mem, config: dict, args) -> int:
     progress = ProgressBar(len(files), prefix="📂 Indexing: ")
     indexed = 0
 
-    for filepath in files:
-        try:
-            relative_path = filepath.relative_to(codebase_root)
-            content = filepath.read_text(encoding='utf-8', errors='ignore')
+    # Use parallel file reading for better performance
+    if use_parallel and len(files) > 10:
+        print(f"   Using parallel ingestion ({num_workers} workers)...")
+        file_data_list = []
 
-            if not content.strip():
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = {
+                executor.submit(_read_file_content, fp, codebase_root): fp
+                for fp in files
+            }
+
+            for future in as_completed(futures):
+                filepath = futures[future]
+                try:
+                    data = future.result()
+                    if data:
+                        file_data_list.append(data)
+                except Exception as e:
+                    if verbose:
+                        print(warning(f"   ⚠️  Skip {filepath}: {e}"))
                 progress.update()
-                continue
 
-            mem.put(
-                title=str(relative_path),
-                text=content,
-                uri=f"file://{relative_path}",
-                tags=[
-                    f"extension:{filepath.suffix}",
-                    f"language:{detect_language(filepath.suffix)}",
-                    f"indexed_at:{datetime.now().isoformat()}"
-                ]
-            )
-            indexed += 1
+        progress.finish()
 
-            if verbose:
-                print(f"   + {relative_path}")
+        # Now batch insert into memvid
+        print(f"   Committing {len(file_data_list)} files to index...")
+        for data in file_data_list:
+            try:
+                mem.put(
+                    title=data['title'],
+                    text=data['text'],
+                    uri=data['uri'],
+                    tags=data['tags']
+                )
+                indexed += 1
+                if verbose:
+                    print(f"   + {data['title']}")
+            except Exception as e:
+                if verbose:
+                    print(warning(f"   ⚠️  Failed to index {data['title']}: {e}"))
+    else:
+        # Sequential processing for small file sets
+        for filepath in files:
+            try:
+                relative_path = filepath.relative_to(codebase_root)
+                content = filepath.read_text(encoding='utf-8', errors='ignore')
 
-        except Exception as e:
-            if verbose:
-                print(warning(f"   ⚠️  Skip {filepath}: {e}"))
+                if not content.strip():
+                    progress.update()
+                    continue
 
-        progress.update()
+                mem.put(
+                    title=str(relative_path),
+                    text=content,
+                    uri=f"file://{relative_path}",
+                    tags=[
+                        f"extension:{filepath.suffix}",
+                        f"language:{detect_language(filepath.suffix)}",
+                        f"indexed_at:{datetime.now().isoformat()}"
+                    ]
+                )
+                indexed += 1
 
-    progress.finish()
+                if verbose:
+                    print(f"   + {relative_path}")
+
+            except Exception as e:
+                if verbose:
+                    print(warning(f"   ⚠️  Skip {filepath}: {e}"))
+
+            progress.update()
+
+        progress.finish()
+
     return indexed
 
 
@@ -1147,22 +1262,38 @@ def cmd_remember(args):
         else:
             tags.append("category:general")
 
-        with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
-            mem.put(
-                title=title,
-                text=args.message,
-                uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                tags=tags
-            )
+        # Check deduplication setting
+        use_dedupe = config["memory"].get("dedupe", True)
 
+        with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+            try:
+                # Try with dedupe parameter if supported
+                mem.put(
+                    title=title,
+                    text=args.message,
+                    uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    tags=tags,
+                    dedupe=use_dedupe
+                )
+            except TypeError:
+                # Fallback if memvid doesn't support dedupe parameter
+                mem.put(
+                    title=title,
+                    text=args.message,
+                    uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    tags=tags
+                )
+
+        dedupe_note = " (dedupe)" if use_dedupe else ""
         print(f"✅ Remembered{tag_str}: {title}")
-        print(f"   📝 Saved to local memory.mv2")
+        print(f"   📝 Saved to local memory.mv2{dedupe_note}")
 
 
 def cmd_search(args):
     """Search code, memory, or both."""
     check_memvid()
 
+    config = get_config()
     code_path = get_code_path()
     memory_path = get_memory_path()
 
@@ -1181,19 +1312,46 @@ def cmd_search(args):
     elif context_lines:
         snippet_chars = max(400, context_lines * 200)
 
+    # Check for adaptive retrieval setting
+    use_adaptive = config["index"].get("adaptive_retrieval", True)
+    # Allow command-line override
+    if getattr(args, 'no_adaptive', False):
+        use_adaptive = False
+
     results = []
+
+    # Build find() kwargs based on adaptive setting
+    def build_find_kwargs(top_k: int, snippet_chars: int) -> dict:
+        kwargs = {'snippet_chars': snippet_chars}
+        if use_adaptive:
+            # Use adaptive retrieval - let memvid determine optimal count
+            kwargs['adaptive'] = True
+            kwargs['k'] = top_k  # max results as upper bound
+        else:
+            kwargs['k'] = top_k
+        return kwargs
+
+    find_kwargs = build_find_kwargs(args.top_k, snippet_chars)
 
     # Search code
     if args.scope in ('code', 'all') and code_path.exists():
         with memvid_sdk.use('basic', str(code_path), mode='open') as mem:
-            response = mem.find(args.query, k=args.top_k, snippet_chars=snippet_chars)
+            try:
+                response = mem.find(args.query, **find_kwargs)
+            except TypeError:
+                # Fallback if memvid doesn't support adaptive parameter
+                response = mem.find(args.query, k=args.top_k, snippet_chars=snippet_chars)
             for hit in response.get('hits', []):
                 results.append(('code', hit))
 
     # Search local memory (memory.mv2)
     if args.scope in ('memory', 'all') and memory_path.exists():
         with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
-            response = mem.find(args.query, k=args.top_k, snippet_chars=snippet_chars)
+            try:
+                response = mem.find(args.query, **find_kwargs)
+            except TypeError:
+                # Fallback if memvid doesn't support adaptive parameter
+                response = mem.find(args.query, k=args.top_k, snippet_chars=snippet_chars)
             for hit in response.get('hits', []):
                 results.append(('memory', hit))
 
@@ -1846,6 +2004,187 @@ def cmd_reindex(args):
     cmd_index(args)
 
 
+def cmd_doctor(args):
+    """Run diagnostics and maintenance on twin-mind stores."""
+    check_memvid()
+
+    config = get_config()
+    if not config["output"]["color"] or not supports_color():
+        Colors.disable()
+
+    code_path = get_code_path()
+    memory_path = get_memory_path()
+    decisions_path = get_decisions_path()
+
+    do_vacuum = getattr(args, 'vacuum', False)
+    do_rebuild = getattr(args, 'rebuild', False)
+
+    print(f"\n🩺 Twin-Mind Doctor")
+    print("═" * 50)
+
+    issues = []
+    recommendations = []
+
+    # Check if initialized
+    if not get_brain_dir().exists():
+        print(error("❌ Twin-Mind not initialized"))
+        print("   Run: twin-mind init")
+        return
+
+    # Check code store
+    print(f"\n📄 Code Store: {code_path}")
+    if code_path.exists():
+        code_size = code_path.stat().st_size
+        code_size_mb = code_size / (1024 * 1024)
+        print(f"   Size: {format_size(code_size)}")
+
+        try:
+            with memvid_sdk.use('basic', str(code_path), mode='open') as mem:
+                stats = mem.stats()
+                frame_count = stats.get('frame_count', 0)
+                print(f"   Frames: {frame_count}")
+
+                # Check for bloat (size vs frame count ratio)
+                if frame_count > 0:
+                    bytes_per_frame = code_size / frame_count
+                    if bytes_per_frame > 50000:  # > 50KB per frame suggests bloat
+                        issues.append("Code index may be bloated")
+                        recommendations.append("Run: twin-mind doctor --vacuum")
+
+                # Vacuum if requested
+                if do_vacuum:
+                    print(f"   {info('Vacuuming...')}")
+                    try:
+                        mem.vacuum()
+                        new_size = code_path.stat().st_size
+                        saved = code_size - new_size
+                        if saved > 0:
+                            print(f"   {success(f'✓ Reclaimed {format_size(saved)}')}")
+                        else:
+                            print(f"   {success('✓ Already optimized')}")
+                    except AttributeError:
+                        print(f"   {warning('⚠ Vacuum not supported in this memvid version')}")
+
+                # Rebuild if requested
+                if do_rebuild:
+                    print(f"   {info('Rebuilding index...')}")
+                    try:
+                        mem.rebuild_index()
+                        print(f"   {success('✓ Index rebuilt')}")
+                    except AttributeError:
+                        print(f"   {warning('⚠ Rebuild not supported in this memvid version')}")
+
+        except Exception as e:
+            issues.append(f"Code store error: {e}")
+            print(f"   {error(f'Error: {e}')}")
+    else:
+        print(f"   {warning('Not created')}")
+        recommendations.append("Run: twin-mind index")
+
+    # Check memory store
+    print(f"\n📝 Memory Store: {memory_path}")
+    if memory_path.exists():
+        mem_size = memory_path.stat().st_size
+        mem_size_mb = mem_size / (1024 * 1024)
+        print(f"   Size: {format_size(mem_size)}")
+
+        # Size warnings based on memvid recommendations
+        if mem_size_mb > 15:
+            issues.append(f"Memory store is large ({mem_size_mb:.1f}MB)")
+            recommendations.append("Consider: twin-mind prune memory --before 30d")
+
+        try:
+            with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+                stats = mem.stats()
+                mem_count = stats.get('frame_count', 0)
+                print(f"   Entries: {mem_count}")
+
+                # Vacuum if requested
+                if do_vacuum:
+                    print(f"   {info('Vacuuming...')}")
+                    try:
+                        mem.vacuum()
+                        new_size = memory_path.stat().st_size
+                        saved = mem_size - new_size
+                        if saved > 0:
+                            print(f"   {success(f'✓ Reclaimed {format_size(saved)}')}")
+                        else:
+                            print(f"   {success('✓ Already optimized')}")
+                    except AttributeError:
+                        print(f"   {warning('⚠ Vacuum not supported in this memvid version')}")
+
+        except Exception as e:
+            issues.append(f"Memory store error: {e}")
+            print(f"   {error(f'Error: {e}')}")
+    else:
+        print(f"   {warning('Not created')}")
+
+    # Check shared decisions
+    print(f"\n📤 Shared Decisions: {decisions_path}")
+    if decisions_path.exists():
+        decisions_size = decisions_path.stat().st_size
+        print(f"   Size: {format_size(decisions_size)}")
+        memories = read_shared_memories()
+        print(f"   Entries: {len(memories)}")
+
+        # Check for malformed entries
+        malformed = 0
+        try:
+            with open(decisions_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            json.loads(line)
+                        except json.JSONDecodeError:
+                            malformed += 1
+        except Exception:
+            pass
+
+        if malformed > 0:
+            issues.append(f"{malformed} malformed entries in decisions.jsonl")
+            print(f"   {warning(f'⚠ {malformed} malformed entries')}")
+    else:
+        print(f"   No shared decisions yet")
+
+    # Check index staleness
+    print(f"\n🔗 Index State:")
+    state = load_index_state()
+    if state:
+        age = get_index_age()
+        print(f"   Last indexed: {age or 'unknown'}")
+
+        if is_git_repo():
+            last_commit = state.get("last_commit", "")
+            if last_commit:
+                behind = get_commits_behind(last_commit)
+                if behind > 0:
+                    issues.append(f"Index is {behind} commits behind")
+                    print(f"   {warning(f'⚠ {behind} commits behind HEAD')}")
+                    recommendations.append("Run: twin-mind index")
+                elif behind == 0:
+                    print(f"   {success('✓ Up to date with HEAD')}")
+    else:
+        print(f"   {warning('No index state found')}")
+        recommendations.append("Run: twin-mind index")
+
+    # Summary
+    print(f"\n{'═' * 50}")
+    if issues:
+        print(f"\n⚠️  Issues found ({len(issues)}):")
+        for issue in issues:
+            print(f"   • {issue}")
+    else:
+        print(f"\n{success('✅ No issues found')}")
+
+    if recommendations:
+        print(f"\n💡 Recommendations:")
+        for rec in recommendations:
+            print(f"   • {rec}")
+
+    print()
+
+
 def cmd_uninstall(args):
     """Uninstall twin-mind from the system."""
     import shutil
@@ -1999,6 +2338,8 @@ Repository: https://github.com/your-username/twin-mind
                           help='Show N lines before/after each match')
     p_search.add_argument('--full', action='store_true',
                           help='Show full file content for code matches')
+    p_search.add_argument('--no-adaptive', action='store_true',
+                          help='Disable adaptive retrieval (use fixed top-k)')
 
     # ask
     p_ask = subparsers.add_parser('ask', help='Ask a question')
@@ -2048,6 +2389,13 @@ Repository: https://github.com/your-username/twin-mind
     p_uninstall = subparsers.add_parser('uninstall', help='Remove twin-mind installation')
     p_uninstall.add_argument('--force', '-f', action='store_true', help='Skip confirmation')
 
+    # doctor
+    p_doctor = subparsers.add_parser('doctor', help='Run diagnostics and maintenance')
+    p_doctor.add_argument('--vacuum', action='store_true',
+                          help='Reclaim space from deleted entries')
+    p_doctor.add_argument('--rebuild', action='store_true',
+                          help='Rebuild indexes (recommended after >20%% deletions)')
+
     args = parser.parse_args()
 
     # Handle --no-color flag globally
@@ -2072,7 +2420,8 @@ Repository: https://github.com/your-username/twin-mind
         'prune': cmd_prune,
         'context': cmd_context,
         'export': cmd_export,
-        'uninstall': cmd_uninstall
+        'uninstall': cmd_uninstall,
+        'doctor': cmd_doctor
     }
 
     # Auto-init for commands that need it

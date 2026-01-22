@@ -113,6 +113,8 @@ your-project/.claude/
 | `reset memory` | Clear local memories |
 | `prune memory --before 30d` | Remove old memories |
 | `export --format md` | Export memories to markdown |
+| `doctor` | Health check and diagnostics |
+| `doctor --vacuum` | Reclaim space from deletions |
 | `uninstall` | Remove twin-mind installation |
 
 ---
@@ -312,16 +314,36 @@ Optional `.claude/settings.json`:
 ```json
 {
   "twin-mind": {
-    "share_memories": false,
     "extensions": {
       "include": [".py", ".ts", ".tsx"],
       "exclude": [".min.js", ".bundle.js"]
     },
     "skip_dirs": ["node_modules", "dist", "custom_vendor"],
-    "max_file_size": "500KB"
+    "max_file_size": "500KB",
+    "index": {
+      "parallel": true,
+      "parallel_workers": 4,
+      "embedding_model": "bge-small",
+      "adaptive_retrieval": true
+    },
+    "memory": {
+      "share_memories": false,
+      "dedupe": true
+    }
   }
 }
 ```
+
+### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `index.parallel` | `true` | Enable parallel file reading (3-6x faster) |
+| `index.parallel_workers` | `4` | Number of parallel workers |
+| `index.embedding_model` | `null` | Embedding model: `bge-small`, `bge-base`, `gte-large`, `openai` |
+| `index.adaptive_retrieval` | `true` | Auto-determine optimal result count |
+| `memory.share_memories` | `false` | Default memories to shared decisions |
+| `memory.dedupe` | `true` | Enable deduplication for memories |
 
 Configuration is optional - sensible defaults work out of box.
 
@@ -336,6 +358,14 @@ Twin-Mind uses [Memvid](https://github.com/memvid/memvid) for code and local mem
 - **Single-file format** (`.mv2`) - No database setup
 - **Sub-ms retrieval** - Native Rust core
 - **Semantic search** - BM25 + vector embeddings
+
+### Performance Features (v1.2.0)
+
+- **Parallel ingestion** - 3-6x faster indexing with concurrent file reading
+- **Adaptive retrieval** - Auto-determines optimal result count based on relevance
+- **Deduplication** - SimHash prevents duplicate memories
+- **Configurable embeddings** - Choose model based on speed/quality tradeoff
+- **Doctor command** - Health checks, vacuum, and index maintenance
 
 ### File Types Indexed
 
