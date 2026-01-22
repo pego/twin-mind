@@ -114,6 +114,98 @@ SKIP_DIRS = {
 
 MAX_FILE_SIZE = 500 * 1024  # 500KB
 
+# Default config (can be overridden via .claude/settings.json)
+DEFAULT_CONFIG = {
+    "extensions": {
+        "include": [],
+        "exclude": []
+    },
+    "skip_dirs": [],
+    "max_file_size": "500KB",
+    "index": {
+        "auto_incremental": True,
+        "track_deletions": True
+    },
+    "output": {
+        "color": True,
+        "verbose": False
+    }
+}
+
+
+def parse_size(size_str: str) -> int:
+    """Parse size string like '500KB' to bytes."""
+    size_str = str(size_str).strip().upper()
+    multipliers = {'B': 1, 'KB': 1024, 'MB': 1024*1024, 'GB': 1024**3}
+    for suffix, mult in multipliers.items():
+        if size_str.endswith(suffix):
+            return int(float(size_str[:-len(suffix)]) * mult)
+    return int(size_str)
+
+
+def load_config() -> dict:
+    """Load twin-mind config from .claude/settings.json."""
+    import copy
+    config = copy.deepcopy(DEFAULT_CONFIG)
+    settings_path = Path.cwd() / BRAIN_DIR / "settings.json"
+
+    if settings_path.exists():
+        try:
+            with open(settings_path, 'r') as f:
+                settings = json.load(f)
+            if "twin-mind" in settings:
+                user_config = settings["twin-mind"]
+                # Merge extensions
+                if "extensions" in user_config:
+                    if "include" in user_config["extensions"]:
+                        config["extensions"]["include"] = user_config["extensions"]["include"]
+                    if "exclude" in user_config["extensions"]:
+                        config["extensions"]["exclude"] = user_config["extensions"]["exclude"]
+                # Merge skip_dirs
+                if "skip_dirs" in user_config:
+                    config["skip_dirs"] = user_config["skip_dirs"]
+                # Other settings
+                if "max_file_size" in user_config:
+                    config["max_file_size"] = user_config["max_file_size"]
+                if "index" in user_config:
+                    config["index"].update(user_config["index"])
+                if "output" in user_config:
+                    config["output"].update(user_config["output"])
+        except (json.JSONDecodeError, IOError) as e:
+            print(warning(f"⚠️  Config parse error: {e}. Using defaults."))
+
+    return config
+
+
+def get_extensions(config: dict) -> set:
+    """Get final set of extensions to index."""
+    extensions = CODE_EXTENSIONS.copy()
+    for ext in config["extensions"]["include"]:
+        extensions.add(ext if ext.startswith('.') else f'.{ext}')
+    for ext in config["extensions"]["exclude"]:
+        extensions.discard(ext if ext.startswith('.') else f'.{ext}')
+    return extensions
+
+
+def get_skip_dirs(config: dict) -> set:
+    """Get final set of directories to skip."""
+    skip = SKIP_DIRS.copy()
+    for d in config["skip_dirs"]:
+        skip.add(d)
+    return skip
+
+
+# Global config (loaded once)
+_config_cache = None
+
+
+def get_config() -> dict:
+    """Get cached config."""
+    global _config_cache
+    if _config_cache is None:
+        _config_cache = load_config()
+    return _config_cache
+
 
 # === Helpers ===
 
