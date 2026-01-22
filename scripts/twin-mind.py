@@ -517,16 +517,17 @@ def confirm(message: str) -> bool:
 
 
 def print_banner():
-    print("""
-  ______         _          __  __ _           _ 
+    banner = r"""
+  ______         _          __  __ _           _
  |__  __|       (_)        |  \/  (_)         | |
     | |_      __ _ _ __    | \  / |_ _ __   __| |
     | \ \ /\ / / | '_ \   | |\/| | | '_ \ / _` |
     | |\ V  V /| | | | |  | |  | | | | | | (_| |
     |_| \_/\_/ |_|_| |_|  |_|  |_|_|_| |_|\__,_|
-    
+
     Dual Memory for AI Coding Agents v{version}
-    """.format(version=VERSION))
+    """
+    print(banner.format(version=VERSION))
 
 
 # === Commands ===
