@@ -95,7 +95,7 @@ def info(msg: str) -> str:
 BRAIN_DIR = ".claude"
 CODE_FILE = "code.mv2"
 MEMORY_FILE = "memory.mv2"
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 CODE_EXTENSIONS = {
     '.py', '.js', '.ts', '.tsx', '.jsx', '.java', '.kt', '.scala',
@@ -436,6 +436,32 @@ def get_index_age() -> str | None:
             return "just now"
     except (ValueError, KeyError):
         return None
+
+
+def check_stale_index(quiet: bool = False) -> bool:
+    """Check if index is stale and optionally print warning.
+
+    Returns True if index is stale (or missing).
+    """
+    if not is_git_repo():
+        return False  # Can't determine staleness without git
+
+    state = load_index_state()
+    if not state or "last_commit" not in state:
+        if not quiet:
+            print(warning("⚠️  No index state found. Run: twin-mind index"))
+        return True
+
+    last_commit = state["last_commit"]
+    commits_behind = get_commits_behind(last_commit)
+
+    if commits_behind > 0:
+        if not quiet:
+            print(warning(f"⚠️  Index may be stale ({commits_behind} commits behind)"))
+            print("   Run: twin-mind index")
+        return True
+
+    return False
 
 
 # === Helpers ===
@@ -806,72 +832,128 @@ def cmd_remember(args):
 def cmd_search(args):
     """Search code, memory, or both."""
     check_memvid()
-    
+
     code_path = get_code_path()
     memory_path = get_memory_path()
-    
+
+    # Warn if code index is stale (when searching code)
+    if args.scope in ('code', 'all') and code_path.exists():
+        check_stale_index()
+
+    # Check for --context and --full flags
+    context_lines = getattr(args, 'context', None)
+    show_full = getattr(args, 'full', False)
+
+    # Adjust snippet size based on flags
+    snippet_chars = 400
+    if show_full:
+        snippet_chars = 100000  # Get as much as possible
+    elif context_lines:
+        snippet_chars = max(400, context_lines * 200)
+
     results = []
-    
+
     # Search code
     if args.scope in ('code', 'all') and code_path.exists():
         mem = Memvid.open(str(code_path))
         req = SearchRequest(
             query=args.query,
             top_k=args.top_k,
-            snippet_chars=400
+            snippet_chars=snippet_chars
         )
         response = mem.search(req)
         for hit in response.hits:
             results.append(('code', hit))
-    
+
     # Search memory
     if args.scope in ('memory', 'all') and memory_path.exists():
         mem = Memvid.open(str(memory_path))
         req = SearchRequest(
             query=args.query,
             top_k=args.top_k,
-            snippet_chars=400
+            snippet_chars=snippet_chars
         )
         response = mem.search(req)
         for hit in response.hits:
             results.append(('memory', hit))
-    
+
     # Sort by score and limit
     results.sort(key=lambda x: x[1].score, reverse=True)
     results = results[:args.top_k]
-    
+
     if not results:
         print(f"🔍 No results for: '{args.query}'")
         return
-    
-    # JSON output
+
+    # JSON output with enhanced metadata
     if args.json:
-        output = []
+        output = {
+            "query": args.query,
+            "results": [],
+            "meta": {
+                "scope": args.scope,
+                "total_results": len(results)
+            }
+        }
         for source, hit in results:
-            output.append({
+            result_obj = {
                 "source": source,
-                "title": hit.title,
+                "file": hit.title,
                 "score": hit.score,
                 "uri": hit.uri,
-                "snippet": hit.text.strip()[:300]
-            })
+                "snippet": hit.text.strip()
+            }
+            # Try to extract line numbers from URI for code
+            if source == 'code' and hit.uri and hit.uri.startswith('twin-mind://code/'):
+                result_obj["file_path"] = hit.uri.replace('twin-mind://code/', '')
+            output["results"].append(result_obj)
         print(json.dumps(output, indent=2))
         return
-    
+
     print(f"\n🔍 Results for: '{args.query}' (in: {args.scope})\n")
     print("=" * 60)
-    
+
     for i, (source, hit) in enumerate(results, 1):
         icon = "📄" if source == 'code' else "📝"
         title = hit.title or "untitled"
-        
+
         print(f"\n{icon} [{i}] {title}")
         print(f"   Score: {hit.score:.3f} | Source: {source}")
         print("-" * 40)
-        
-        snippet = hit.text.strip()[:300]
-        indented = "\n".join(f"   {line}" for line in snippet.split("\n")[:8])
-        print(indented)
+
+        # Get content to display
+        content = hit.text.strip()
+
+        # For code results with --full flag, try to read actual file
+        if source == 'code' and show_full and hit.uri:
+            file_path = hit.uri.replace('twin-mind://code/', '')
+            if Path(file_path).exists():
+                try:
+                    content = Path(file_path).read_text()
+                    print(f"   [Full file: {file_path}]")
+                except Exception:
+                    pass  # Fall back to stored snippet
+
+        # For code results with --context, show more lines
+        if source == 'code' and context_lines and not show_full:
+            # The snippet already has more chars, just show more lines
+            lines = content.split('\n')
+            max_lines = min(len(lines), context_lines * 2 + 10)
+            content = '\n'.join(lines[:max_lines])
+
+        # Display content
+        if show_full:
+            # Show full content with line numbers
+            lines = content.split('\n')
+            for line_num, line in enumerate(lines, 1):
+                print(f"   {line_num:4d} | {line}")
+        else:
+            # Show limited snippet
+            max_chars = 300 if not context_lines else context_lines * 100
+            max_lines = 8 if not context_lines else context_lines * 2
+            snippet = content[:max_chars]
+            indented = "\n".join(f"   {line}" for line in snippet.split("\n")[:max_lines])
+            print(indented)
 
 
 def cmd_ask(args):
@@ -955,27 +1037,37 @@ def cmd_stats(args):
 def cmd_reset(args):
     """Reset code, memory, or both stores."""
     check_memvid()
-    
+
+    dry_run = getattr(args, 'dry_run', False)
     code_path = get_code_path()
     memory_path = get_memory_path()
-    
+
     target = args.target
-    
+
+    if dry_run:
+        print(info("🔍 Reset preview (dry-run):"))
+
     if target in ('code', 'all'):
         if code_path.exists():
-            if args.force or confirm(f"⚠️  Delete code store ({format_size(code_path.stat().st_size)})?"):
+            size = format_size(code_path.stat().st_size)
+            if dry_run:
+                print(f"   Would reset code store ({size})")
+            elif args.force or confirm(f"⚠️  Delete code store ({size})?"):
                 code_path.unlink()
                 mem = Memvid.create(str(code_path))
                 mem.commit()
-                print(f"✅ Code store reset")
+                print(success("✅ Code store reset"))
             else:
                 print("   Skipped code store")
         else:
             print("   Code store doesn't exist")
-    
+
     if target in ('memory', 'all'):
         if memory_path.exists():
-            if args.force or confirm(f"⚠️  Delete memory store ({format_size(memory_path.stat().st_size)})? This is PERMANENT!"):
+            size = format_size(memory_path.stat().st_size)
+            if dry_run:
+                print(f"   Would reset memory store ({size})")
+            elif args.force or confirm(f"⚠️  Delete memory store ({size})? This is PERMANENT!"):
                 memory_path.unlink()
                 mem = Memvid.create(str(memory_path))
                 opts = PutOptions.builder() \
@@ -989,7 +1081,7 @@ def cmd_reset(args):
                     opts
                 )
                 mem.commit()
-                print(f"✅ Memory store reset")
+                print(success("✅ Memory store reset"))
             else:
                 print("   Skipped memory store")
         else:
@@ -1121,6 +1213,83 @@ def cmd_prune(args):
     new_mem.commit()
 
     print(success(f"✅ Pruned {len(to_remove)} memories ({len(to_keep)} remaining)"))
+
+
+def cmd_context(args):
+    """Generate combined code+memory context for prompts."""
+    check_memvid()
+
+    code_path = get_code_path()
+    memory_path = get_memory_path()
+
+    query = args.query
+    max_tokens = getattr(args, 'max_tokens', 4000)
+
+    # Collect results
+    code_results = []
+    memory_results = []
+
+    # Search code
+    if code_path.exists():
+        mem = Memvid.open(str(code_path))
+        req = SearchRequest(query=query, top_k=5, snippet_chars=2000)
+        response = mem.search(req)
+        code_results = response.hits[:3]  # Top 3 code results
+
+    # Search memory
+    if memory_path.exists():
+        mem = Memvid.open(str(memory_path))
+        req = SearchRequest(query=query, top_k=5, snippet_chars=1000)
+        response = mem.search(req)
+        memory_results = response.hits[:3]  # Top 3 memory results
+
+    # Build context document
+    context_parts = []
+    total_chars = 0
+    char_limit = max_tokens * 4  # Rough char-to-token ratio
+
+    # Add relevant code first
+    if code_results:
+        context_parts.append("## Relevant Code\n")
+        for hit in code_results:
+            if total_chars >= char_limit:
+                break
+            file_name = hit.title or "file"
+            code_block = f"### {file_name}\n```\n{hit.text.strip()[:1500]}\n```\n"
+            context_parts.append(code_block)
+            total_chars += len(code_block)
+
+    # Add relevant memories
+    if memory_results:
+        context_parts.append("\n## Relevant Memories\n")
+        for hit in memory_results:
+            if total_chars >= char_limit:
+                break
+            title = hit.title or "Memory"
+            memory_block = f"- **{title}**: {hit.text.strip()[:500]}\n"
+            context_parts.append(memory_block)
+            total_chars += len(memory_block)
+
+    # Output
+    if not context_parts:
+        print(f"No relevant context found for: {query}")
+        return
+
+    context = "\n".join(context_parts)
+
+    if getattr(args, 'json', False):
+        output = {
+            "query": query,
+            "context": context,
+            "code_results": len(code_results),
+            "memory_results": len(memory_results),
+            "total_chars": len(context)
+        }
+        print(json.dumps(output, indent=2))
+    else:
+        print(f"# Context for: {query}\n")
+        print(context)
+        print(f"\n---\n_Generated from {len(code_results)} code files and {len(memory_results)} memories_")
 
 
 def cmd_export(args):
@@ -1282,8 +1451,9 @@ Repository: https://github.com/your-username/twin-mind
 """
     )
     
-    parser.add_argument('--version', '-v', action='version', version=f'twin-mind {VERSION}')
-    
+    parser.add_argument('--version', '-V', action='version', version=f'twin-mind {VERSION}')
+    parser.add_argument('--no-color', action='store_true', help='Disable colored output')
+
     subparsers = parser.add_subparsers(dest='command', help='Commands')
     
     # init
@@ -1294,6 +1464,12 @@ Repository: https://github.com/your-username/twin-mind
     p_index = subparsers.add_parser('index', help='Index codebase')
     p_index.add_argument('--fresh', '-f', action='store_true',
                          help='Delete existing index and rebuild from scratch')
+    p_index.add_argument('--status', '-s', action='store_true',
+                         help='Preview what would be indexed without executing')
+    p_index.add_argument('--dry-run', action='store_true',
+                         help='Same as --status')
+    p_index.add_argument('--verbose', '-v', action='store_true',
+                         help='Show each file as it is processed')
     
     # remember
     p_remember = subparsers.add_parser('remember', help='Store a memory')
@@ -1307,6 +1483,10 @@ Repository: https://github.com/your-username/twin-mind
                           default='all', help='Where to search (default: all)')
     p_search.add_argument('--top-k', '-k', type=int, default=10, help='Number of results')
     p_search.add_argument('--json', '-j', action='store_true', help='Output as JSON')
+    p_search.add_argument('--context', '-c', type=int, metavar='N',
+                          help='Show N lines before/after each match')
+    p_search.add_argument('--full', action='store_true',
+                          help='Show full file content for code matches')
     
     # ask
     p_ask = subparsers.add_parser('ask', help='Ask a question')
@@ -1330,20 +1510,34 @@ Repository: https://github.com/your-username/twin-mind
     p_reset = subparsers.add_parser('reset', help='Reset a memory store')
     p_reset.add_argument('target', choices=['code', 'memory', 'all'], help='What to reset')
     p_reset.add_argument('--force', '-f', action='store_true', help='Skip confirmation')
+    p_reset.add_argument('--dry-run', action='store_true', help='Preview without executing')
     
     # prune
     p_prune = subparsers.add_parser('prune', help='Prune old memories')
     p_prune.add_argument('target', choices=['memory'], help='What to prune')
     p_prune.add_argument('--before', '-b', help='Remove before date (YYYY-MM-DD, 30d, 2w)')
     p_prune.add_argument('--tag', '-t', help='Remove by tag')
-    
+    p_prune.add_argument('--dry-run', action='store_true', help='Preview without executing')
+    p_prune.add_argument('--force', action='store_true', help='Skip confirmation')
+
+    # context
+    p_context = subparsers.add_parser('context', help='Generate combined context for prompts')
+    p_context.add_argument('query', help='Query to build context for')
+    p_context.add_argument('--max-tokens', '-m', type=int, default=4000,
+                           help='Maximum tokens for context (default: 4000)')
+    p_context.add_argument('--json', '-j', action='store_true', help='Output as JSON')
+
     # export
     p_export = subparsers.add_parser('export', help='Export memories')
     p_export.add_argument('--format', '-f', choices=['md', 'json'], default='md', help='Output format')
     p_export.add_argument('--output', '-o', help='Output file (default: stdout)')
     
     args = parser.parse_args()
-    
+
+    # Handle --no-color flag globally
+    if args.no_color:
+        Colors.disable()
+
     if not args.command:
         parser.print_help()
         sys.exit(1)
@@ -1360,6 +1554,7 @@ Repository: https://github.com/your-username/twin-mind
         'reindex': cmd_reindex,
         'reset': cmd_reset,
         'prune': cmd_prune,
+        'context': cmd_context,
         'export': cmd_export
     }
     

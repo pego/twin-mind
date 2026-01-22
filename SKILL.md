@@ -34,18 +34,32 @@ python scripts/twin-mind.py index     # Index codebase
 | Command | Purpose |
 |---------|---------|
 | `init` | Initialize both stores |
-| `index` | Index codebase (append) |
-| `index --fresh` | Reindex from scratch |
+| `index` | Incremental index (git-based) |
+| `index --fresh` | Full reindex from scratch |
+| `index --status` | Preview what would be indexed |
 | `remember <msg>` | Save decision/insight |
 | `search <query>` | Search all |
 | `search <query> --in code` | Search only code |
-| `search <query> --in memory` | Search only memories |
+| `search <query> --context 10` | Show 10 lines context |
+| `search <query> --full` | Show full file content |
 | `ask <question>` | Semantic query |
+| `context <query>` | Generate combined context for prompts |
 | `recent` | Recent memories |
 | `stats` | Show statistics |
+| `status` | Health check (index age, git state) |
+| `reindex` | Reset code and fresh index |
 | `reset code` | Clear code index |
 | `reset memory` | Clear memories (⚠️ permanent) |
+| `prune memory --before 30d` | Remove old memories |
+| `prune memory --tag session` | Remove by tag |
 | `export --format md` | Export memories to markdown |
+
+### Global Flags
+
+| Flag | Purpose |
+|------|---------|
+| `--no-color` | Disable colored output |
+| `-V, --version` | Show version |
 
 ## Workflows
 
@@ -73,6 +87,40 @@ twin-mind search "database connection" --in code
 ```bash
 twin-mind export --format md -o decisions.md
 twin-mind export --format json -o memories.json
+```
+
+### Maintenance
+```bash
+twin-mind status                    # Check health
+twin-mind prune memory --before 30d # Clean old memories
+twin-mind reindex                   # Full reset and reindex
+```
+
+### Generate context for prompts
+```bash
+twin-mind context "authentication"           # Combined code+memory
+twin-mind context "API design" --json        # Structured JSON
+```
+
+## Configuration
+
+Add to `.claude/settings.json`:
+
+```json
+{
+  "twin-mind": {
+    "extensions": {
+      "include": [".py", ".ts"],
+      "exclude": [".min.js"]
+    },
+    "skip_dirs": ["node_modules", "dist", "custom_dir"],
+    "max_file_size": "500KB",
+    "output": {
+      "color": true,
+      "verbose": false
+    }
+  }
+}
 ```
 
 ## Memory Tags

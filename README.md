@@ -67,7 +67,7 @@ your-project/
 pip install memvid-sdk
 
 # Clone twin-mind
-git clone https://github.com/your-username/twin-mind.git
+git clone https://github.com/pego/twin-mind.git
 cd twin-mind
 ```
 
@@ -102,13 +102,21 @@ twin-mind stats
 | Command | Description |
 |---------|-------------|
 | `init` | Initialize both memory stores |
-| `index` | Index codebase into code store |
-| `index --fresh` | Delete and rebuild code index |
+| `index` | Incremental index (git-based, fast) |
+| `index --fresh` | Full rebuild from scratch |
+| `index --status` | Preview what would be indexed |
 | `remember <msg>` | Store a decision or insight |
 | `search <query>` | Search both stores |
+| `search <query> --context 10` | Show 10 lines context |
+| `search <query> --full` | Show full file content |
 | `ask <question>` | Semantic question (searches both) |
+| `context <query>` | Combined code+memory for prompts |
 | `recent` | Show recent memories |
 | `stats` | Display statistics |
+| `status` | Health check (index age, git state) |
+| `reindex` | Reset code + fresh index |
+| `prune memory --before 30d` | Remove old memories |
+| `prune memory --tag session` | Remove by tag |
 
 ### Search Filters
 
@@ -191,17 +199,31 @@ twin-mind search "validation middleware" --in code
 ### After Major Refactor
 
 ```bash
-# Code structure changed - reset stale index
-twin-mind reset code
+# One command does it all
+twin-mind reindex
 
-# Rebuild fresh
+# Or step by step:
+twin-mind reset code
 twin-mind index --fresh
 
 # Verify
-twin-mind stats
+twin-mind status
 
 # Memories still intact ✓
 twin-mind recent
+```
+
+### Maintenance
+
+```bash
+# Check health
+twin-mind status
+
+# Clean up old session memories
+twin-mind prune memory --before 30d --tag session
+
+# Preview before pruning (dry run)
+twin-mind prune memory --before 7d --dry-run
 ```
 
 ### Onboarding a Teammate
@@ -256,6 +278,40 @@ Add to `.claude/settings.json`:
   }
 }
 ```
+
+---
+
+## ⚙️ Configuration
+
+Add to `.claude/settings.json`:
+
+```json
+{
+  "twin-mind": {
+    "extensions": {
+      "include": [".py", ".ts", ".tsx"],
+      "exclude": [".min.js", ".bundle.js"]
+    },
+    "skip_dirs": ["node_modules", "dist", "custom_vendor"],
+    "max_file_size": "500KB",
+    "output": {
+      "color": true,
+      "verbose": false
+    }
+  }
+}
+```
+
+Configuration is optional — sensible defaults are used if not specified.
+
+### Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--no-color` | Disable colored output |
+| `-V, --version` | Show version |
+
+Environment variable `NO_COLOR=1` also disables colors.
 
 ---
 
