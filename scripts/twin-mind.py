@@ -273,6 +273,171 @@ class FileLock:
         self.release()
 
 
+# === Progress ===
+class ProgressBar:
+    """Simple progress bar for terminal."""
+
+    def __init__(self, total: int, width: int = 30, prefix: str = ""):
+        self.total = total
+        self.width = width
+        self.prefix = prefix
+        self.current = 0
+        self._is_tty = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
+
+    def update(self, n: int = 1):
+        self.current += n
+        if self._is_tty:
+            self._render()
+
+    def _render(self):
+        pct = self.current / self.total if self.total > 0 else 1
+        filled = int(self.width * pct)
+        bar = '=' * filled + '>' + ' ' * (self.width - filled - 1)
+        line = f"\r{self.prefix}[{bar}] {self.current}/{self.total} ({pct*100:.0f}%)"
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+    def finish(self):
+        if self._is_tty:
+            sys.stdout.write('\n')
+            sys.stdout.flush()
+
+
+# === Git Integration ===
+import subprocess
+
+
+def is_git_repo() -> bool:
+    """Check if current directory is a git repo."""
+    try:
+        subprocess.run(
+            ['git', 'rev-parse', '--git-dir'],
+            capture_output=True, check=True, cwd=Path.cwd()
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+
+def get_current_commit() -> str | None:
+    """Get current HEAD commit SHA."""
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            capture_output=True, text=True, check=True, cwd=Path.cwd()
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
+def get_changed_files(since_commit: str) -> tuple[list[str], list[str]]:
+    """Get changed and deleted files since a commit.
+
+    Returns: (changed_files, deleted_files)
+    """
+    changed = []
+    deleted = []
+
+    try:
+        # Changed/added files
+        result = subprocess.run(
+            ['git', 'diff', '--name-only', since_commit, 'HEAD'],
+            capture_output=True, text=True, check=True, cwd=Path.cwd()
+        )
+        changed = [f for f in result.stdout.strip().split('\n') if f]
+
+        # Deleted files
+        result = subprocess.run(
+            ['git', 'diff', '--name-only', '--diff-filter=D', since_commit, 'HEAD'],
+            capture_output=True, text=True, check=True, cwd=Path.cwd()
+        )
+        deleted = [f for f in result.stdout.strip().split('\n') if f]
+
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    return changed, deleted
+
+
+def get_commits_behind(since_commit: str) -> int:
+    """Get number of commits between since_commit and HEAD."""
+    try:
+        result = subprocess.run(
+            ['git', 'rev-list', '--count', f'{since_commit}..HEAD'],
+            capture_output=True, text=True, check=True, cwd=Path.cwd()
+        )
+        return int(result.stdout.strip())
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        return -1
+
+
+def get_branch_name() -> str:
+    """Get current branch name."""
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+            capture_output=True, text=True, check=True, cwd=Path.cwd()
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+
+
+# === Index State ===
+INDEX_STATE_FILE = "index-state.json"
+
+
+def get_index_state_path() -> Path:
+    return Path.cwd() / BRAIN_DIR / INDEX_STATE_FILE
+
+
+def load_index_state() -> dict | None:
+    """Load index state from file."""
+    state_path = get_index_state_path()
+    if not state_path.exists():
+        return None
+    try:
+        with open(state_path, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return None
+
+
+def save_index_state(commit: str, file_count: int):
+    """Save index state to file."""
+    state = {
+        "last_commit": commit,
+        "indexed_at": datetime.now().isoformat(),
+        "file_count": file_count
+    }
+    state_path = get_index_state_path()
+    with open(state_path, 'w') as f:
+        json.dump(state, f, indent=2)
+
+
+def get_index_age() -> str | None:
+    """Get human-readable index age."""
+    state = load_index_state()
+    if not state or "indexed_at" not in state:
+        return None
+
+    try:
+        indexed_at = datetime.fromisoformat(state["indexed_at"])
+        delta = datetime.now() - indexed_at
+
+        if delta.days > 0:
+            return f"{delta.days}d ago"
+        elif delta.seconds >= 3600:
+            return f"{delta.seconds // 3600}h ago"
+        elif delta.seconds >= 60:
+            return f"{delta.seconds // 60}m ago"
+        else:
+            return "just now"
+    except (ValueError, KeyError):
+        return None
+
+
 # === Helpers ===
 
 def check_memvid():
