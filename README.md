@@ -119,23 +119,34 @@ your-project/.claude/
 
 ## Team Sharing
 
-### Default: Local memories
+Twin-Mind's hybrid memory system separates personal notes from team knowledge, enabling seamless collaboration without merge conflicts.
+
+### Local vs Shared Memory
+
+| Aspect | Local (`memory.mv2`) | Shared (`decisions.jsonl`) |
+|--------|---------------------|---------------------------|
+| **Purpose** | Personal notes, TODOs, session context | Team decisions, architecture choices |
+| **Git** | Ignored (`.gitignore`) | Versioned and committed |
+| **Visibility** | Only you | Entire team |
+| **Format** | Binary (memvid) | JSONL (text, mergeable) |
+| **Persistence** | Machine-local | Across all clones |
+
+### Saving Memories
 
 ```bash
-twin-mind remember "Fixed auth bug" --tag bugfix
-# Saved to memory.mv2 (not shared)
+# Default: save locally (personal)
+twin-mind remember "Need to refactor this tomorrow" --tag todo
+
+# Explicit share: save to team decisions
+twin-mind remember "Chose JWT over sessions for stateless auth" --tag arch --share
+
+# Force local even when share_memories is enabled
+twin-mind remember "My debugging notes" --tag debug --local
 ```
 
-### Explicit sharing
+### Team Configuration
 
-```bash
-twin-mind remember "Chose Redis for sessions" --tag arch --share
-# Saved to decisions.jsonl (versioned, shared with team)
-```
-
-### Team configuration (share by default)
-
-Add to `.claude/settings.json`:
+For teams that want all memories shared by default, add to `.claude/settings.json`:
 
 ```json
 {
@@ -145,17 +156,93 @@ Add to `.claude/settings.json`:
 }
 ```
 
-Now all `remember` commands go to `decisions.jsonl` by default. Use `--local` to override.
+With this config:
+- `twin-mind remember "X"` → saves to `decisions.jsonl`
+- `twin-mind remember "X" --local` → saves to `memory.mv2`
 
-### Why JSONL?
+### Searching Across Both
+
+Search automatically queries both local and shared memories:
+
+```bash
+twin-mind search "authentication"
+# Returns results from: code, local memory, AND shared decisions
+
+twin-mind search "Redis" --in memory
+# Returns results from: local memory AND shared decisions
+```
+
+Results show the source:
+```
+📄 [1] auth.py (page 3/10)
+   Score: 5.234 | Source: code
+
+📤 [2] [arch] Chose JWT over sessions...
+   Score: 4.123 | Source: shared
+
+📝 [3] Need to check auth flow
+   Score: 3.456 | Source: memory
+```
+
+### Git Workflow
+
+Shared decisions integrate naturally with git:
+
+```bash
+# Developer A adds a decision
+twin-mind remember "Using PostgreSQL for ACID compliance" --tag arch --share
+git add .claude/decisions.jsonl
+git commit -m "doc: record database choice"
+git push
+
+# Developer B adds another decision (in parallel)
+twin-mind remember "API rate limiting set to 100 req/min" --tag config --share
+git add .claude/decisions.jsonl
+git commit -m "doc: record rate limit decision"
+git pull --rebase  # Merges cleanly!
+git push
+```
+
+### Why JSONL Format?
 
 When two developers add decisions in parallel:
+
 ```jsonl
 {"ts":"2024-01-22T10:30:00Z","msg":"Chose Redis","tag":"arch","author":"alice"}
 {"ts":"2024-01-22T11:45:00Z","msg":"Fixed auth bug","tag":"bugfix","author":"bob"}
 ```
 
-Git merges line additions cleanly. No binary conflicts.
+- **Line-based**: Each decision is one line
+- **Append-only**: New decisions add new lines
+- **Git-friendly**: Line additions merge without conflicts
+- **Human-readable**: Plain JSON, easy to review in PRs
+
+### What to Share vs Keep Local
+
+| Share (team knowledge) | Keep Local (personal) |
+|------------------------|----------------------|
+| Architecture decisions | Personal TODOs |
+| Technology choices | Debugging notes |
+| API design rationale | Session context |
+| Bug root causes | Work-in-progress ideas |
+| Performance decisions | Temporary reminders |
+| Security considerations | Machine-specific notes |
+
+### Viewing Recent Decisions
+
+```bash
+twin-mind recent
+# Shows both local and shared, most recent first
+
+📤 [1] [arch] by alice
+    Chose PostgreSQL for ACID compliance
+
+📝 [2] Need to review PR #42
+    (local, 2 hours ago)
+
+📤 [3] [config] by bob
+    API rate limiting set to 100 req/min
+```
 
 ---
 
