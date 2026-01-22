@@ -98,6 +98,19 @@ BRAIN_DIR = ".claude"
 CODE_FILE = "code.mv2"
 MEMORY_FILE = "memory.mv2"
 VERSION = "1.1.0"
+GITIGNORE_FILE = ".gitignore"
+GITIGNORE_CONTENT = """# Twin-Mind gitignore
+#
+# code.mv2 - Generated codebase index (regeneratable)
+# index-state.json - Machine-specific index metadata
+# memory.mv2 - Local/personal memories (not shared)
+#
+# decisions.jsonl IS versioned - shared team decisions (JSONL = mergeable)
+
+code.mv2
+index-state.json
+memory.mv2
+"""
 
 CODE_EXTENSIONS = {
     '.py', '.js', '.ts', '.tsx', '.jsx', '.java', '.kt', '.scala',
@@ -646,6 +659,15 @@ def ensure_brain_dir():
     get_brain_dir().mkdir(parents=True, exist_ok=True)
 
 
+def create_gitignore() -> bool:
+    """Create .gitignore in .claude directory. Returns True if created."""
+    gitignore_path = get_brain_dir() / GITIGNORE_FILE
+    if not gitignore_path.exists():
+        gitignore_path.write_text(GITIGNORE_CONTENT)
+        return True
+    return False
+
+
 # === Auto-Initialization ===
 
 # Directories where auto-init should be skipped
@@ -722,8 +744,9 @@ def auto_init(args) -> bool:
     print(f"   {info('Auto-initializing...')}")
 
     try:
-        # Create directory
+        # Create directory and gitignore
         ensure_brain_dir()
+        create_gitignore()
 
         # Create stores
         code_path = get_code_path()
@@ -841,6 +864,7 @@ def cmd_init(args):
             return
 
     ensure_brain_dir()
+    create_gitignore()
 
     # Initialize code store
     if code_path.exists():
