@@ -37,6 +37,8 @@ dev = [
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
     "pre-commit>=3.0.0",
+    "mypy>=1.0.0",
+    "bandit>=1.7.0",
 ]
 
 [project.scripts]
@@ -127,3 +129,31 @@ exclude_lines = [
     "if TYPE_CHECKING:",
 ]
 show_missing = true
+
+# Mypy configuration
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = false
+warn_unused_ignores = false
+disallow_untyped_defs = false
+check_untyped_defs = false
+ignore_missing_imports = true
+disable_error_code = ["union-attr", "index", "attr-defined", "var-annotated", "assignment"]
+exclude = [
+    "tests/",
+    "build/",
+    "dist/",
+]
+
+# Bandit configuration
+[tool.bandit]
+exclude_dirs = ["tests", "build", "dist"]
+skips = [
+    "B101",  # assert (used in tests)
+    "B108",  # hardcoded tmp (false positive in our case)
+    "B110",  # try-except-pass (intentional for graceful fallbacks)
+    "B310",  # urllib urlopen (we control the URL)
+    "B404",  # subprocess import (needed for git operations)
+    "B603",  # subprocess without shell (we use fixed git commands)
+    "B607",  # partial path (git is expected in PATH)
+]

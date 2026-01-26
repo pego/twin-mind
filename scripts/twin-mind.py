@@ -32,7 +32,6 @@ if __name__ == "__main__":
     if str(package_dir) not in sys.path:
         sys.path.insert(0, str(package_dir))
 
-from twin_mind.cli import main
+    from twin_mind.cli import main
 
-if __name__ == "__main__":
     main()

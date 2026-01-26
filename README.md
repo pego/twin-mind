@@ -2,9 +2,13 @@
 
 **Dual memory for AI coding agents** - Codebase knowledge + Conversation memory with team-friendly sharing.
 
+[![CI](https://github.com/pego/twin-mind/actions/workflows/ci.yml/badge.svg)](https://github.com/pego/twin-mind/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/pego/twin-mind/graph/badge.svg)](https://codecov.io/gh/pego/twin-mind)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Powered by Memvid](https://img.shields.io/badge/powered%20by-memvid-orange.svg)](https://github.com/memvid/memvid)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 
 ---
 

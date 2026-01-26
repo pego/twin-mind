@@ -27,6 +27,42 @@ jobs:
       - name: Run ruff format check
         run: ruff format --check scripts/
 
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install mypy
+          pip install -e . || true
+
+      - name: Run mypy
+        run: mypy scripts/twin_mind --ignore-missing-imports
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install bandit
+        run: pip install bandit
+
+      - name: Run bandit
+        run: bandit -r scripts/twin_mind -c pyproject.toml
+
   test:
     name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -72,7 +108,7 @@ jobs:
   build:
     name: Build Package
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, typecheck, security, test]
     steps:
       - uses: actions/checkout@v4
 
