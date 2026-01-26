@@ -106,7 +106,7 @@ download_file() {
 main() {
     echo ""
     echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║      Twin-Mind Installer v1.3.0        ║${NC}"
+    echo -e "${BLUE}║      Twin-Mind Installer v1.4.0        ║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -152,23 +152,43 @@ main() {
     "$INSTALL_DIR/venv/bin/pip" install --quiet memvid-sdk
     success "  ✓ Installed memvid-sdk"
 
-    # Step 6: Install twin-mind.py
-    info "Installing twin-mind script..."
+    # Step 6: Install twin-mind.py and twin_mind package
+    info "Installing twin-mind..."
 
     # Check if running from repo (local install) or via curl (remote install)
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     if [ -f "$SCRIPT_DIR/scripts/twin-mind.py" ]; then
         # Local install from repo
         cp "$SCRIPT_DIR/scripts/twin-mind.py" "$INSTALL_DIR/twin-mind.py"
+        # Copy package directory
+        if [ -d "$SCRIPT_DIR/scripts/twin_mind" ]; then
+            cp -r "$SCRIPT_DIR/scripts/twin_mind" "$INSTALL_DIR/twin_mind"
+        fi
     else
-        # Remote install via curl
+        # Remote install via curl - download main script
         download_file "$REPO_URL/scripts/twin-mind.py" "$INSTALL_DIR/twin-mind.py"
+
+        # Download package files
+        info "  Downloading twin_mind package..."
+        mkdir -p "$INSTALL_DIR/twin_mind/commands"
+
+        # Core modules
+        for module in __init__ constants output config fs git memory memvid_check index_state shared_memory indexing auto_init cli; do
+            download_file "$REPO_URL/scripts/twin_mind/${module}.py" "$INSTALL_DIR/twin_mind/${module}.py"
+        done
+
+        # Command modules
+        download_file "$REPO_URL/scripts/twin_mind/commands/__init__.py" "$INSTALL_DIR/twin_mind/commands/__init__.py"
+        for cmd in init index remember search ask recent stats status reset reindex prune context export doctor upgrade uninstall; do
+            download_file "$REPO_URL/scripts/twin_mind/commands/${cmd}.py" "$INSTALL_DIR/twin_mind/commands/${cmd}.py"
+        done
     fi
     chmod +x "$INSTALL_DIR/twin-mind.py"
     success "  ✓ Installed twin-mind.py"
+    success "  ✓ Installed twin_mind package"
 
     # Step 7: Create version file
-    echo "1.3.0" > "$INSTALL_DIR/version.txt"
+    echo "1.4.0" > "$INSTALL_DIR/version.txt"
 
     # Step 8: Install skill
     info "Installing Claude Code skill..."

@@ -132,6 +132,46 @@ def cmd_upgrade(args):
         current_script.chmod(0o755)
         print(f"   {success('+')} Updated twin-mind.py")
 
+        # Update twin_mind package
+        print(f"   {info('Updating twin_mind package...')}")
+        package_dir = INSTALL_DIR / "twin_mind"
+        commands_dir = package_dir / "commands"
+
+        # Backup existing package
+        package_backup = INSTALL_DIR / "twin_mind.backup"
+        if package_dir.exists():
+            if package_backup.exists():
+                shutil.rmtree(package_backup)
+            shutil.copytree(package_dir, package_backup)
+
+        # Create directories
+        package_dir.mkdir(parents=True, exist_ok=True)
+        commands_dir.mkdir(parents=True, exist_ok=True)
+
+        # Download core modules
+        core_modules = ['__init__', 'constants', 'output', 'config', 'fs', 'git',
+                        'memory', 'memvid_check', 'index_state', 'shared_memory',
+                        'indexing', 'auto_init', 'cli']
+        for module in core_modules:
+            try:
+                content = _fetch_url(f"{REPO_URL}/scripts/twin_mind/{module}.py")
+                (package_dir / f"{module}.py").write_text(content, encoding='utf-8')
+            except Exception as e:
+                print(f"   {warning(f'Failed to update {module}.py: {e}')}")
+
+        # Download command modules
+        cmd_modules = ['__init__', 'init', 'index', 'remember', 'search', 'ask',
+                       'recent', 'stats', 'status', 'reset', 'reindex', 'prune',
+                       'context', 'export', 'doctor', 'upgrade', 'uninstall']
+        for module in cmd_modules:
+            try:
+                content = _fetch_url(f"{REPO_URL}/scripts/twin_mind/commands/{module}.py")
+                (commands_dir / f"{module}.py").write_text(content, encoding='utf-8')
+            except Exception as e:
+                print(f"   {warning(f'Failed to update commands/{module}.py: {e}')}")
+
+        print(f"   {success('+')} Updated twin_mind package")
+
         # Update version file
         version_file.write_text(latest_version)
         print(f"   {success('+')} Updated version.txt")
