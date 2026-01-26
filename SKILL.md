@@ -1,26 +1,67 @@
 ---
 name: twin-mind
-description: Codebase knowledge + conversation memory. Use proactively for code questions, past decisions, and finding implementations.
+description: |
+  Codebase knowledge + conversation memory. Use proactively for code questions, past decisions, and finding implementations.
+
+  TRIGGER PHRASES - Invoke this skill when user asks:
+  - "where is", "which file", "find the", "locate", "show me"
+  - "how does", "what does", "explain how", "walk me through"
+  - "why did we", "what did we decide", "what was the reason"
+  - "remember when", "we discussed", "previously", "last time"
+  - "architecture", "implementation", "codebase", "pattern"
+
+  DEFAULT: When uncertain if context would help, search first - it's fast and non-destructive.
 ---
 
 # Twin-Mind
 
 Dual memory layer: **code index** (resettable) + **conversation memory** (local + shared).
 
-## Auto-Search Behavior
+---
 
-**Before answering, search twin-mind when the question involves:**
-- Understanding existing code (how does X work, where is Y implemented)
-- Past decisions (why did we choose X, what did we decide about Y)
-- Finding implementations (where is X defined, which file handles Y)
-- Debugging context (what changed recently, related error patterns)
-- Architecture questions (how do these components connect)
+## IMPORTANT: When to Use This Skill
 
-**Skip searching for:**
-- Direct action commands (fix this, add X, rename Y to Z)
-- Clarifications about the current conversation
-- Questions unrelated to the codebase
-- Simple tasks that don't need context
+### Trigger Keywords (Search Automatically)
+
+**Location queries:**
+- "where", "which file", "find", "locate", "show me", "look for"
+
+**Understanding queries:**
+- "how does", "what does", "explain", "walk through", "understand"
+
+**History/Memory queries:**
+- "why did we", "what was", "when did", "who decided", "remember"
+- "we discussed", "previously", "last time", "earlier"
+
+**Architecture queries:**
+- "how do these connect", "what's the pattern", "architecture"
+- "implementation", "structure", "design"
+
+### Question → Command Mapping
+
+| User Question Pattern | Command to Run |
+|-----------------------|----------------|
+| "Where is X implemented?" | `twin-mind search "X" --in code` |
+| "How does X work?" | `twin-mind search "X" --in code` |
+| "Why did we choose X?" | `twin-mind search "X" --in memory` |
+| "What did we decide about X?" | `twin-mind search "X" --in memory` |
+| "What do we know about X?" | `twin-mind search "X"` |
+| "Find anything related to X" | `twin-mind search "X"` |
+
+### When NOT to Use (Skip Searching)
+
+- Direct action commands without context needs: "fix this typo", "add a button"
+- Questions about the current conversation: "what did I just say?"
+- Generic programming questions unrelated to THIS codebase: "what's Python syntax for X?"
+- Simple tasks with explicit instructions: "rename variable foo to bar"
+
+### Default Behavior
+
+**When uncertain whether context would help → Search first.**
+
+Twin-mind searches are fast and non-destructive. When in doubt, a quick search provides context that improves answers. It's better to search and find nothing useful than to miss important context.
+
+---
 
 ## Installation
 

@@ -24,7 +24,7 @@ Usage:
 import sys
 from pathlib import Path
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 # Ensure the package directory is in the path
 if __name__ == "__main__":
