@@ -2,6 +2,19 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.4.0] - 2025-01-26
+
+### Changed
+- **Modularized Architecture**: Refactored 2,597-line monolith into a proper Python package
+  - `twin-mind.py` is now a thin 37-line wrapper
+  - Created `twin_mind/` package with 30 organized modules
+  - Core modules: `constants`, `output`, `config`, `fs`, `git`, `memory`, `indexing`
+  - State modules: `memvid_check`, `index_state`, `shared_memory`, `auto_init`
+  - CLI module: `cli.py` with argparse setup and command dispatch
+  - Commands package: 16 individual command modules in `commands/`
+  - Clean separation of concerns and improved maintainability
+  - No functional changes - all existing commands work identically
+
 ## [1.3.0] - 2025-01-22
 
 ### Added
