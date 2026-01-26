@@ -24,6 +24,8 @@ Usage:
 import sys
 from pathlib import Path
 
+VERSION = "1.5.0"
+
 # Ensure the package directory is in the path
 if __name__ == "__main__":
     package_dir = Path(__file__).parent
