@@ -2,6 +2,7 @@
 
 import sys
 from datetime import datetime
+from typing import Any
 
 from twin_mind.config import get_config
 from twin_mind.fs import get_memory_path
@@ -10,16 +11,16 @@ from twin_mind.memvid_check import check_memvid, get_memvid_sdk
 from twin_mind.shared_memory import write_shared_memory
 
 
-def cmd_remember(args):
+def cmd_remember(args: Any) -> None:
     """Store a memory/decision/insight."""
     config = get_config()
 
     # Determine destination: shared (decisions.jsonl) or local (memory.mv2)
     # Priority: explicit flags > config > default (local)
     use_shared = False
-    if hasattr(args, 'share') and args.share:
+    if hasattr(args, "share") and args.share:
         use_shared = True
-    elif hasattr(args, 'local') and args.local:
+    elif hasattr(args, "local") and args.local:
         use_shared = False
     elif config["memory"].get("share_memories", False):
         use_shared = True
@@ -59,7 +60,7 @@ def cmd_remember(args):
         # Check deduplication setting
         use_dedupe = config["memory"].get("dedupe", True)
 
-        with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+        with memvid_sdk.use("basic", str(memory_path), mode="open") as mem:
             try:
                 # Try with dedupe parameter if supported
                 mem.put(
@@ -67,7 +68,7 @@ def cmd_remember(args):
                     text=args.message,
                     uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                     tags=tags,
-                    dedupe=use_dedupe
+                    dedupe=use_dedupe,
                 )
             except TypeError:
                 # Fallback if memvid doesn't support dedupe parameter
@@ -75,7 +76,7 @@ def cmd_remember(args):
                     title=title,
                     text=args.message,
                     uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                    tags=tags
+                    tags=tags,
                 )
 
         dedupe_note = " (dedupe)" if use_dedupe else ""

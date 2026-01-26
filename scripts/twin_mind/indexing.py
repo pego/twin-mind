@@ -3,7 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from twin_mind.config import get_extensions, get_skip_dirs, parse_size
 from twin_mind.output import ProgressBar, warning
@@ -12,18 +12,34 @@ from twin_mind.output import ProgressBar, warning
 def detect_language(ext: str) -> str:
     """Detect programming language from file extension."""
     lang_map = {
-        '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
-        '.tsx': 'typescript', '.jsx': 'javascript', '.java': 'java',
-        '.go': 'go', '.rs': 'rust', '.c': 'c', '.cpp': 'cpp',
-        '.rb': 'ruby', '.php': 'php', '.sql': 'sql', '.sh': 'bash',
-        '.md': 'markdown', '.yaml': 'yaml', '.json': 'json',
-        '.html': 'html', '.css': 'css', '.vue': 'vue',
-        '.svelte': 'svelte', '.graphql': 'graphql', '.proto': 'protobuf'
+        ".py": "python",
+        ".js": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescript",
+        ".jsx": "javascript",
+        ".java": "java",
+        ".go": "go",
+        ".rs": "rust",
+        ".c": "c",
+        ".cpp": "cpp",
+        ".rb": "ruby",
+        ".php": "php",
+        ".sql": "sql",
+        ".sh": "bash",
+        ".md": "markdown",
+        ".yaml": "yaml",
+        ".json": "json",
+        ".html": "html",
+        ".css": "css",
+        ".vue": "vue",
+        ".svelte": "svelte",
+        ".graphql": "graphql",
+        ".proto": "protobuf",
     }
-    return lang_map.get(ext.lower(), 'text')
+    return lang_map.get(ext.lower(), "text")
 
 
-def collect_files(config: dict) -> list[Path]:
+def collect_files(config: Dict[str, Any]) -> List[Path]:
     """Collect all indexable files from current directory."""
     root = Path.cwd()
     extensions = get_extensions(config)
@@ -31,10 +47,10 @@ def collect_files(config: dict) -> list[Path]:
     max_size = parse_size(config["max_file_size"])
 
     files = []
-    for item in root.rglob('*'):
+    for item in root.rglob("*"):
         if item.is_file():
             parts = item.relative_to(root).parts
-            if any(p.startswith('.') or p in skip_dirs for p in parts):
+            if any(p.startswith(".") or p in skip_dirs for p in parts):
                 continue
             if item.suffix.lower() in extensions:
                 if item.stat().st_size <= max_size:
@@ -42,36 +58,36 @@ def collect_files(config: dict) -> list[Path]:
     return files
 
 
-def _read_file_content(filepath: Path, codebase_root: Path) -> Optional[dict]:
+def _read_file_content(filepath: Path, codebase_root: Path) -> Optional[Dict[str, Any]]:
     """Read a single file and prepare it for indexing. Returns None if file should be skipped."""
     try:
-        content = filepath.read_text(encoding='utf-8', errors='ignore')
+        content = filepath.read_text(encoding="utf-8", errors="ignore")
         if not content.strip():
             return None
 
         relative_path = filepath.relative_to(codebase_root)
         return {
-            'title': str(relative_path),
-            'text': content,
-            'uri': f"file://{relative_path}",
-            'tags': [
+            "title": str(relative_path),
+            "text": content,
+            "uri": f"file://{relative_path}",
+            "tags": [
                 f"extension:{filepath.suffix}",
                 f"language:{detect_language(filepath.suffix)}",
-                f"indexed_at:{datetime.now().isoformat()}"
+                f"indexed_at:{datetime.now().isoformat()}",
             ],
-            'filepath': filepath
+            "filepath": filepath,
         }
     except Exception:
         return None
 
 
-def index_files_full(mem, config: dict, args) -> int:
+def index_files_full(mem: Any, config: Dict[str, Any], args: Any) -> int:
     """Full reindex of all files."""
     codebase_root = Path.cwd()
-    extensions = get_extensions(config)
-    skip_dirs = get_skip_dirs(config)
-    max_size = parse_size(config["max_file_size"])
-    verbose = config["output"]["verbose"] or getattr(args, 'verbose', False)
+    get_extensions(config)
+    get_skip_dirs(config)
+    parse_size(config["max_file_size"])
+    verbose = config["output"]["verbose"] or getattr(args, "verbose", False)
     use_parallel = config["index"].get("parallel", True)
     num_workers = config["index"].get("parallel_workers", 4)
 
@@ -92,10 +108,7 @@ def index_files_full(mem, config: dict, args) -> int:
         file_data_list = []
 
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = {
-                executor.submit(_read_file_content, fp, codebase_root): fp
-                for fp in files
-            }
+            futures = {executor.submit(_read_file_content, fp, codebase_root): fp for fp in files}
 
             for future in as_completed(futures):
                 filepath = futures[future]
@@ -114,12 +127,7 @@ def index_files_full(mem, config: dict, args) -> int:
         print(f"   Committing {len(file_data_list)} files to index...")
         for data in file_data_list:
             try:
-                mem.put(
-                    title=data['title'],
-                    text=data['text'],
-                    uri=data['uri'],
-                    tags=data['tags']
-                )
+                mem.put(title=data["title"], text=data["text"], uri=data["uri"], tags=data["tags"])
                 indexed += 1
                 if verbose:
                     print(f"   + {data['title']}")
@@ -131,7 +139,7 @@ def index_files_full(mem, config: dict, args) -> int:
         for filepath in files:
             try:
                 relative_path = filepath.relative_to(codebase_root)
-                content = filepath.read_text(encoding='utf-8', errors='ignore')
+                content = filepath.read_text(encoding="utf-8", errors="ignore")
 
                 if not content.strip():
                     progress.update()
@@ -144,8 +152,8 @@ def index_files_full(mem, config: dict, args) -> int:
                     tags=[
                         f"extension:{filepath.suffix}",
                         f"language:{detect_language(filepath.suffix)}",
-                        f"indexed_at:{datetime.now().isoformat()}"
-                    ]
+                        f"indexed_at:{datetime.now().isoformat()}",
+                    ],
                 )
                 indexed += 1
 
@@ -163,12 +171,14 @@ def index_files_full(mem, config: dict, args) -> int:
     return indexed
 
 
-def index_files_incremental(mem, changed_files: list[str], config: dict, args) -> int:
+def index_files_incremental(
+    mem: Any, changed_files: List[str], config: Dict[str, Any], args: Any
+) -> int:
     """Incremental reindex of changed files only."""
     codebase_root = Path.cwd()
     extensions = get_extensions(config)
     max_size = parse_size(config["max_file_size"])
-    verbose = config["output"]["verbose"] or getattr(args, 'verbose', False)
+    verbose = config["output"]["verbose"] or getattr(args, "verbose", False)
 
     indexed = 0
 
@@ -185,7 +195,7 @@ def index_files_incremental(mem, changed_files: list[str], config: dict, args) -
             continue
 
         try:
-            content = filepath.read_text(encoding='utf-8', errors='ignore')
+            content = filepath.read_text(encoding="utf-8", errors="ignore")
             if not content.strip():
                 continue
 
@@ -196,8 +206,8 @@ def index_files_incremental(mem, changed_files: list[str], config: dict, args) -
                 tags=[
                     f"extension:{filepath.suffix}",
                     f"language:{detect_language(filepath.suffix)}",
-                    f"indexed_at:{datetime.now().isoformat()}"
-                ]
+                    f"indexed_at:{datetime.now().isoformat()}",
+                ],
             )
             indexed += 1
 
@@ -211,12 +221,12 @@ def index_files_incremental(mem, changed_files: list[str], config: dict, args) -
     return indexed
 
 
-def get_memvid_create_kwargs(config: dict) -> dict:
+def get_memvid_create_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
     """Build kwargs for memvid store creation based on config."""
     kwargs = {}
 
     embedding_model = config["index"].get("embedding_model")
     if embedding_model:
-        kwargs['model'] = embedding_model
+        kwargs["model"] = embedding_model
 
     return kwargs

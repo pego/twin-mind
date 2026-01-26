@@ -2,13 +2,14 @@
 
 import json
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 from twin_mind.fs import get_decisions_path
 from twin_mind.git import get_git_author
 from twin_mind.output import error
 
 
-def write_shared_memory(message: str, tag: str = None) -> bool:
+def write_shared_memory(message: str, tag: Optional[str] = None) -> bool:
     """Write a memory to the shared decisions.jsonl file."""
     decisions_path = get_decisions_path()
 
@@ -16,20 +17,20 @@ def write_shared_memory(message: str, tag: str = None) -> bool:
         "ts": datetime.now().isoformat(),
         "msg": message,
         "tag": tag or "general",
-        "author": get_git_author()
+        "author": get_git_author(),
     }
 
     try:
         # Append to file (create if doesn't exist)
-        with open(decisions_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + '\n')
+        with open(decisions_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         return True
     except Exception as e:
         print(error(f"Failed to write shared memory: {e}"))
         return False
 
 
-def read_shared_memories() -> list:
+def read_shared_memories() -> List[Dict[str, Any]]:
     """Read all memories from decisions.jsonl."""
     decisions_path = get_decisions_path()
     memories = []
@@ -38,8 +39,8 @@ def read_shared_memories() -> list:
         return memories
 
     try:
-        with open(decisions_path, 'r', encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
+        with open(decisions_path, encoding="utf-8") as f:
+            for _line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line:
                     continue
@@ -55,7 +56,7 @@ def read_shared_memories() -> list:
     return memories
 
 
-def search_shared_memories(query: str, top_k: int = 10) -> list:
+def search_shared_memories(query: str, top_k: int = 10) -> List[Tuple[int, Dict[str, Any]]]:
     """Search shared memories using simple text matching.
 
     Returns list of (score, entry) tuples sorted by relevance.
@@ -69,8 +70,8 @@ def search_shared_memories(query: str, top_k: int = 10) -> list:
     results = []
 
     for entry in memories:
-        msg = entry.get('msg', '').lower()
-        tag = entry.get('tag', '').lower()
+        msg = entry.get("msg", "").lower()
+        tag = entry.get("tag", "").lower()
 
         # Simple scoring: count matching words + bonus for tag match
         score = 0

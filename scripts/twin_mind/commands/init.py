@@ -1,20 +1,21 @@
 """Init command for twin-mind."""
 
 from datetime import datetime
+from typing import Any
 
 from twin_mind.config import get_config
 from twin_mind.fs import (
+    create_gitignore,
+    ensure_brain_dir,
     get_code_path,
     get_memory_path,
-    ensure_brain_dir,
-    create_gitignore,
 )
 from twin_mind.indexing import get_memvid_create_kwargs
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
-from twin_mind.output import print_banner, confirm
+from twin_mind.output import confirm, print_banner
 
 
-def cmd_init(args):
+def cmd_init(args: Any) -> None:
     """Initialize twin-mind (both stores)."""
     check_memvid()
     memvid_sdk = get_memvid_sdk()
@@ -50,34 +51,36 @@ def cmd_init(args):
     if code_path.exists():
         code_path.unlink()
     try:
-        with memvid_sdk.use('basic', str(code_path), mode='create', **create_kwargs) as code_mem:
+        with memvid_sdk.use("basic", str(code_path), mode="create", **create_kwargs):
             pass  # Just create empty store
     except TypeError:
         # Fallback if memvid doesn't support model parameter
-        with memvid_sdk.use('basic', str(code_path), mode='create') as code_mem:
+        with memvid_sdk.use("basic", str(code_path), mode="create"):
             pass
 
     # Initialize memory store with welcome message
     if memory_path.exists():
         memory_path.unlink()
     try:
-        with memvid_sdk.use('basic', str(memory_path), mode='create', **create_kwargs) as memory_mem:
+        with memvid_sdk.use(
+            "basic", str(memory_path), mode="create", **create_kwargs
+        ) as memory_mem:
             init_msg = f"Twin-Mind initialized on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             memory_mem.put(
                 title="Twin-Mind Initialized",
                 text=init_msg,
                 uri="twin-mind://system/init",
-                tags=["system", f"timestamp:{datetime.now().isoformat()}"]
+                tags=["system", f"timestamp:{datetime.now().isoformat()}"],
             )
     except TypeError:
         # Fallback if memvid doesn't support model parameter
-        with memvid_sdk.use('basic', str(memory_path), mode='create') as memory_mem:
+        with memvid_sdk.use("basic", str(memory_path), mode="create") as memory_mem:
             init_msg = f"Twin-Mind initialized on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             memory_mem.put(
                 title="Twin-Mind Initialized",
                 text=init_msg,
                 uri="twin-mind://system/init",
-                tags=["system", f"timestamp:{datetime.now().isoformat()}"]
+                tags=["system", f"timestamp:{datetime.now().isoformat()}"],
             )
 
     model_note = f" (model: {embedding_model})" if embedding_model else ""

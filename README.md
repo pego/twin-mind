@@ -395,6 +395,68 @@ Removes `~/.twin-mind/`, the skill directory, and the shell alias.
 
 ---
 
+## Development
+
+### Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/pego/twin-mind.git
+cd twin-mind
+
+# Install in development mode with dev dependencies
+pip install -e ".[dev]"
+
+# Install pre-commit hooks
+pre-commit install
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run with coverage report
+pytest --cov=scripts/twin_mind
+
+# Run specific test file
+pytest tests/test_config.py
+
+# Run with verbose output
+pytest -v
+```
+
+### Linting and Formatting
+
+```bash
+# Check for linting issues
+ruff check scripts/
+
+# Auto-fix linting issues
+ruff check scripts/ --fix
+
+# Format code
+ruff format scripts/
+
+# Check formatting without changes
+ruff format scripts/ --check
+```
+
+### Pre-commit Hooks
+
+Pre-commit hooks run automatically on `git commit`. To run manually:
+
+```bash
+# Run on all files
+pre-commit run --all-files
+
+# Run on staged files only
+pre-commit run
+```
+
+---
+
 ## Contributing
 
 Contributions welcome! Please:

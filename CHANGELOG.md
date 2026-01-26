@@ -2,6 +2,44 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.5.0] - 2025-01-26
+
+### Added
+- **Test Suite**: Comprehensive pytest tests with 121 test cases
+  - Tests for config, filesystem, git, memory, output, and indexing modules
+  - Command tests for init and remember
+  - Shared fixtures in conftest.py
+  - Coverage reporting support
+
+- **GitHub Actions CI/CD**: Automated testing and linting pipeline
+  - Lint job with ruff
+  - Test matrix: ubuntu/macos × Python 3.8/3.10/3.12
+  - Build verification job
+
+- **Pre-commit Hooks**: Automated code quality checks
+  - ruff linting with auto-fix
+  - ruff formatting
+
+- **Development Documentation**: README updated with dev setup instructions
+  - How to install dev dependencies
+  - How to run tests
+  - How to lint and format code
+
+### Changed
+- **Complete Type Hints**: All 30 Python files now have full type annotations
+  - Python 3.8 compatible using `typing` module
+  - All public functions annotated with parameter and return types
+
+- **Code Formatting**: All code formatted with ruff
+  - Line length: 100 characters
+  - Consistent style across all modules
+
+### Fixed
+- 64 linting issues identified and resolved by ruff
+  - Import sorting
+  - Unused imports and variables
+  - Python 3.8+ compatibility fixes
+
 ## [1.4.0] - 2025-01-26
 
 ### Changed

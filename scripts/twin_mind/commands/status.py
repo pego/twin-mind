@@ -1,15 +1,17 @@
 """Status command for twin-mind."""
 
+from typing import Any
+
 from twin_mind.config import get_config
-from twin_mind.fs import get_code_path, get_memory_path, get_decisions_path
-from twin_mind.git import is_git_repo, get_branch_name, get_current_commit, get_commits_behind
-from twin_mind.index_state import load_index_state, get_index_age
+from twin_mind.fs import get_code_path, get_decisions_path, get_memory_path
+from twin_mind.git import get_branch_name, get_commits_behind, get_current_commit, is_git_repo
+from twin_mind.index_state import get_index_age, load_index_state
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
-from twin_mind.output import Colors, supports_color, success, warning, format_size
+from twin_mind.output import Colors, format_size, success, supports_color, warning
 from twin_mind.shared_memory import read_shared_memories
 
 
-def cmd_status(args):
+def cmd_status(args: Any) -> None:
     """Show twin-mind health status."""
     check_memvid()
     memvid_sdk = get_memvid_sdk()
@@ -21,22 +23,22 @@ def cmd_status(args):
     code_path = get_code_path()
     memory_path = get_memory_path()
 
-    print(f"\nTwin-Mind Status")
+    print("\nTwin-Mind Status")
     print("=" * 50)
 
     # Code stats
     if code_path.exists():
         code_size = format_size(code_path.stat().st_size)
         try:
-            with memvid_sdk.use('basic', str(code_path), mode='open') as mem:
+            with memvid_sdk.use("basic", str(code_path), mode="open") as mem:
                 stats = mem.stats()
-                frame_count = stats.get('frame_count', 0)
+                frame_count = stats.get("frame_count", 0)
         except Exception:
             frame_count = "?"
 
         # Get actual file count from index state
         index_state = load_index_state()
-        file_count = index_state.get('file_count', '?') if index_state else '?'
+        file_count = index_state.get("file_count", "?") if index_state else "?"
 
         age = get_index_age() or "unknown"
         print(f"Code     {code_size:>8} | {file_count} files, {frame_count} frames | indexed {age}")
@@ -47,9 +49,9 @@ def cmd_status(args):
     if memory_path.exists():
         mem_size = format_size(memory_path.stat().st_size)
         try:
-            with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+            with memvid_sdk.use("basic", str(memory_path), mode="open") as mem:
                 stats = mem.stats()
-                mem_count = stats.get('frame_count', 0)
+                mem_count = stats.get("frame_count", 0)
         except Exception:
             mem_count = "?"
         print(f"Local    {mem_size:>8} | {mem_count} entries")

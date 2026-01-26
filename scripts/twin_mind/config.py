@@ -3,11 +3,12 @@
 import copy
 import json
 from pathlib import Path
+from typing import Any, Dict, Optional, Set
 
 from twin_mind.constants import (
     BRAIN_DIR,
-    DEFAULT_CONFIG,
     CODE_EXTENSIONS,
+    DEFAULT_CONFIG,
     SKIP_DIRS,
 )
 from twin_mind.output import warning
@@ -17,21 +18,21 @@ def parse_size(size_str: str) -> int:
     """Parse size string like '500KB' to bytes."""
     size_str = str(size_str).strip().upper()
     # Check longer suffixes first to avoid 'B' matching before 'KB'
-    multipliers = [('GB', 1024**3), ('MB', 1024*1024), ('KB', 1024), ('B', 1)]
+    multipliers = [("GB", 1024**3), ("MB", 1024 * 1024), ("KB", 1024), ("B", 1)]
     for suffix, mult in multipliers:
         if size_str.endswith(suffix):
-            return int(float(size_str[:-len(suffix)]) * mult)
+            return int(float(size_str[: -len(suffix)]) * mult)
     return int(size_str)
 
 
-def load_config() -> dict:
+def load_config() -> Dict[str, Any]:
     """Load twin-mind config from .claude/settings.json."""
     config = copy.deepcopy(DEFAULT_CONFIG)
     settings_path = Path.cwd() / BRAIN_DIR / "settings.json"
 
     if settings_path.exists():
         try:
-            with open(settings_path, 'r') as f:
+            with open(settings_path) as f:
                 settings = json.load(f)
             if "twin-mind" in settings:
                 user_config = settings["twin-mind"]
@@ -59,23 +60,23 @@ def load_config() -> dict:
                 # Legacy support: embedding_model at top level
                 if "embedding_model" in user_config:
                     config["index"]["embedding_model"] = user_config["embedding_model"]
-        except (json.JSONDecodeError, IOError) as e:
+        except (OSError, json.JSONDecodeError) as e:
             print(warning(f"Config parse error: {e}. Using defaults."))
 
     return config
 
 
-def get_extensions(config: dict) -> set:
+def get_extensions(config: Dict[str, Any]) -> Set[str]:
     """Get final set of extensions to index."""
     extensions = CODE_EXTENSIONS.copy()
     for ext in config["extensions"]["include"]:
-        extensions.add(ext if ext.startswith('.') else f'.{ext}')
+        extensions.add(ext if ext.startswith(".") else f".{ext}")
     for ext in config["extensions"]["exclude"]:
-        extensions.discard(ext if ext.startswith('.') else f'.{ext}')
+        extensions.discard(ext if ext.startswith(".") else f".{ext}")
     return extensions
 
 
-def get_skip_dirs(config: dict) -> set:
+def get_skip_dirs(config: Dict[str, Any]) -> Set[str]:
     """Get final set of directories to skip."""
     skip = SKIP_DIRS.copy()
     for d in config["skip_dirs"]:
@@ -84,10 +85,10 @@ def get_skip_dirs(config: dict) -> set:
 
 
 # Global config (loaded once)
-_config_cache = None
+_config_cache: Optional[Dict[str, Any]] = None
 
 
-def get_config() -> dict:
+def get_config() -> Dict[str, Any]:
     """Get cached config."""
     global _config_cache
     if _config_cache is None:

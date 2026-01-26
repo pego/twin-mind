@@ -1,17 +1,18 @@
 """Doctor command for twin-mind."""
 
 import json
+from typing import Any
 
 from twin_mind.config import get_config
-from twin_mind.fs import get_brain_dir, get_code_path, get_memory_path, get_decisions_path
-from twin_mind.git import is_git_repo, get_commits_behind
-from twin_mind.index_state import load_index_state, get_index_age
+from twin_mind.fs import get_brain_dir, get_code_path, get_decisions_path, get_memory_path
+from twin_mind.git import get_commits_behind, is_git_repo
+from twin_mind.index_state import get_index_age, load_index_state
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
-from twin_mind.output import Colors, supports_color, success, warning, error, info, format_size
+from twin_mind.output import Colors, error, format_size, info, success, supports_color, warning
 from twin_mind.shared_memory import read_shared_memories
 
 
-def cmd_doctor(args):
+def cmd_doctor(args: Any) -> None:
     """Run diagnostics and maintenance on twin-mind stores."""
     check_memvid()
     memvid_sdk = get_memvid_sdk()
@@ -24,10 +25,10 @@ def cmd_doctor(args):
     memory_path = get_memory_path()
     decisions_path = get_decisions_path()
 
-    do_vacuum = getattr(args, 'vacuum', False)
-    do_rebuild = getattr(args, 'rebuild', False)
+    do_vacuum = getattr(args, "vacuum", False)
+    do_rebuild = getattr(args, "rebuild", False)
 
-    print(f"\nTwin-Mind Doctor")
+    print("\nTwin-Mind Doctor")
     print("=" * 50)
 
     issues = []
@@ -43,13 +44,13 @@ def cmd_doctor(args):
     print(f"\nCode Store: {code_path}")
     if code_path.exists():
         code_size = code_path.stat().st_size
-        code_size_mb = code_size / (1024 * 1024)
+        code_size / (1024 * 1024)
         print(f"   Size: {format_size(code_size)}")
 
         try:
-            with memvid_sdk.use('basic', str(code_path), mode='open') as mem:
+            with memvid_sdk.use("basic", str(code_path), mode="open") as mem:
                 stats = mem.stats()
-                frame_count = stats.get('frame_count', 0)
+                frame_count = stats.get("frame_count", 0)
                 print(f"   Frames: {frame_count}")
 
                 # Check for bloat (size vs frame count ratio)
@@ -102,9 +103,9 @@ def cmd_doctor(args):
             recommendations.append("Consider: twin-mind prune memory --before 30d")
 
         try:
-            with memvid_sdk.use('basic', str(memory_path), mode='open') as mem:
+            with memvid_sdk.use("basic", str(memory_path), mode="open") as mem:
                 stats = mem.stats()
-                mem_count = stats.get('frame_count', 0)
+                mem_count = stats.get("frame_count", 0)
                 print(f"   Entries: {mem_count}")
 
                 # Vacuum if requested
@@ -138,7 +139,7 @@ def cmd_doctor(args):
         # Check for malformed entries
         malformed = 0
         try:
-            with open(decisions_path, 'r', encoding='utf-8') as f:
+            with open(decisions_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line:
@@ -153,10 +154,10 @@ def cmd_doctor(args):
             issues.append(f"{malformed} malformed entries in decisions.jsonl")
             print(f"   {warning(f'{malformed} malformed entries')}")
     else:
-        print(f"   No shared decisions yet")
+        print("   No shared decisions yet")
 
     # Check index staleness
-    print(f"\nIndex State:")
+    print("\nIndex State:")
     state = load_index_state()
     if state:
         age = get_index_age()
@@ -186,7 +187,7 @@ def cmd_doctor(args):
         print(f"\n{success('No issues found')}")
 
     if recommendations:
-        print(f"\nRecommendations:")
+        print("\nRecommendations:")
         for rec in recommendations:
             print(f"   - {rec}")
 

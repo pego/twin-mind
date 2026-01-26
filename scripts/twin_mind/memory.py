@@ -1,7 +1,9 @@
 """Memory parsing utilities for twin-mind."""
 
+from typing import Any, Dict
 
-def parse_timeline_entry(entry: dict) -> dict:
+
+def parse_timeline_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
     """Parse a timeline entry's preview field into structured data.
 
     Timeline entries have format:
@@ -9,35 +11,35 @@ def parse_timeline_entry(entry: dict) -> dict:
 
     Returns dict with: title, text, uri, tags
     """
-    preview = entry.get('preview', '')
-    uri = entry.get('uri', '')
+    preview = entry.get("preview", "")
+    uri = entry.get("uri", "")
 
     # Default values
     result = {
-        'title': 'untitled',
-        'text': preview,
-        'uri': uri or '',
-        'tags': [],
-        'timestamp': entry.get('timestamp', 0),
-        'frame_id': entry.get('frame_id', '')
+        "title": "untitled",
+        "text": preview,
+        "uri": uri or "",
+        "tags": [],
+        "timestamp": entry.get("timestamp", 0),
+        "frame_id": entry.get("frame_id", ""),
     }
 
     # Parse embedded metadata from preview
-    lines = preview.split('\n')
+    lines = preview.split("\n")
     text_lines = []
 
     for line in lines:
-        if line.startswith('title: '):
-            result['title'] = line[7:]
-        elif line.startswith('uri: '):
-            if not result['uri']:
-                result['uri'] = line[5:]
-        elif line.startswith('tags: '):
+        if line.startswith("title: "):
+            result["title"] = line[7:]
+        elif line.startswith("uri: "):
+            if not result["uri"]:
+                result["uri"] = line[5:]
+        elif line.startswith("tags: "):
             tags_str = line[6:]
             if tags_str:
-                result['tags'] = [t.strip() for t in tags_str.split(',') if t.strip()]
+                result["tags"] = [t.strip() for t in tags_str.split(",") if t.strip()]
         else:
             text_lines.append(line)
 
-    result['text'] = '\n'.join(text_lines).strip()
+    result["text"] = "\n".join(text_lines).strip()
     return result

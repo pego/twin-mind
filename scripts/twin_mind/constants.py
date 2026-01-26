@@ -24,53 +24,108 @@ memory.mv2
 
 # Default extensions to index
 CODE_EXTENSIONS = {
-    '.py', '.js', '.ts', '.tsx', '.jsx', '.java', '.kt', '.scala',
-    '.go', '.rs', '.c', '.cpp', '.h', '.hpp', '.cs', '.rb', '.php',
-    '.swift', '.sql', '.sh', '.bash', '.yaml', '.yml', '.json',
-    '.toml', '.xml', '.html', '.css', '.scss', '.md', '.txt', '.vue',
-    '.svelte', '.astro', '.prisma', '.graphql', '.proto', '.tf'
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".java",
+    ".kt",
+    ".scala",
+    ".go",
+    ".rs",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".cs",
+    ".rb",
+    ".php",
+    ".swift",
+    ".sql",
+    ".sh",
+    ".bash",
+    ".yaml",
+    ".yml",
+    ".json",
+    ".toml",
+    ".xml",
+    ".html",
+    ".css",
+    ".scss",
+    ".md",
+    ".txt",
+    ".vue",
+    ".svelte",
+    ".astro",
+    ".prisma",
+    ".graphql",
+    ".proto",
+    ".tf",
 }
 
 # Directories to skip during indexing
 SKIP_DIRS = {
-    'node_modules', '.git', '__pycache__', '.venv', 'venv', 'env',
-    '.idea', '.vscode', 'dist', 'build', 'target', '.next', '.nuxt',
-    'coverage', '.pytest_cache', '.mypy_cache', 'vendor', '.claude',
-    '.terraform', '.serverless', 'cdk.out', '.aws-sam'
+    "node_modules",
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "env",
+    ".idea",
+    ".vscode",
+    "dist",
+    "build",
+    "target",
+    ".next",
+    ".nuxt",
+    "coverage",
+    ".pytest_cache",
+    ".mypy_cache",
+    "vendor",
+    ".claude",
+    ".terraform",
+    ".serverless",
+    "cdk.out",
+    ".aws-sam",
 }
 
 MAX_FILE_SIZE = 500 * 1024  # 500KB
 
 # Directories where auto-init should be skipped
 UNSAFE_DIRS = {
-    '/',
-    '/usr', '/etc', '/var', '/tmp', '/opt', '/bin', '/sbin',
-    '/System', '/Library', '/Applications',  # macOS
-    '/Windows', '/Program Files', '/Program Files (x86)',  # Windows
+    "/",
+    "/usr",
+    "/etc",
+    "/var",
+    "/tmp",
+    "/opt",
+    "/bin",
+    "/sbin",
+    "/System",
+    "/Library",
+    "/Applications",  # macOS
+    "/Windows",
+    "/Program Files",
+    "/Program Files (x86)",  # Windows
 }
 
 # Default configuration
 DEFAULT_CONFIG = {
-    "extensions": {
-        "include": [],
-        "exclude": []
-    },
+    "extensions": {"include": [], "exclude": []},
     "skip_dirs": [],
     "max_file_size": "500KB",
     "index": {
         "auto_incremental": True,
         "track_deletions": True,
-        "parallel": True,           # Enable parallel ingestion (3-6x faster)
-        "parallel_workers": 4,      # Number of parallel workers
-        "embedding_model": None,    # None=default, "bge-small", "bge-base", "gte-large", "openai"
-        "adaptive_retrieval": True  # Auto-determine optimal result count
+        "parallel": True,  # Enable parallel ingestion (3-6x faster)
+        "parallel_workers": 4,  # Number of parallel workers
+        "embedding_model": None,  # None=default, "bge-small", "bge-base", "gte-large", "openai"
+        "adaptive_retrieval": True,  # Auto-determine optimal result count
     },
-    "output": {
-        "color": True,
-        "verbose": False
-    },
+    "output": {"color": True, "verbose": False},
     "memory": {
-        "share_memories": False,    # If True, memories go to shared decisions.jsonl
-        "dedupe": True              # Enable SimHash deduplication
-    }
+        "share_memories": False,  # If True, memories go to shared decisions.jsonl
+        "dedupe": True,  # Enable SimHash deduplication
+    },
 }

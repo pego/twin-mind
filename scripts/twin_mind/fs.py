@@ -4,38 +4,42 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Any, Optional, TextIO
 
 from twin_mind.constants import (
     BRAIN_DIR,
     CODE_FILE,
-    MEMORY_FILE,
-    GITIGNORE_FILE,
     GITIGNORE_CONTENT,
+    GITIGNORE_FILE,
+    MEMORY_FILE,
 )
 
-
 # File locking (platform-specific)
-if sys.platform == 'win32':
+if sys.platform == "win32":
     import msvcrt
-    def _lock_file(f):
+
+    def _lock_file(f: TextIO) -> None:
         msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
-    def _unlock_file(f):
+
+    def _unlock_file(f: TextIO) -> None:
         msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
 else:
     import fcntl
-    def _lock_file(f):
+
+    def _lock_file(f: TextIO) -> None:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    def _unlock_file(f):
+
+    def _unlock_file(f: TextIO) -> None:
         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 class FileLock:
     """Simple file-based lock with timeout."""
 
-    def __init__(self, path: Path, timeout: int = 5):
-        self.lock_path = Path(str(path) + '.lock')
+    def __init__(self, path: Path, timeout: int = 5) -> None:
+        self.lock_path = Path(str(path) + ".lock")
         self.timeout = timeout
-        self._lock_file = None
+        self._lock_file: Optional[TextIO] = None
 
     def acquire(self) -> bool:
         """Acquire lock, return True if successful."""
@@ -48,16 +52,16 @@ class FileLock:
                     if age > 60:
                         self.lock_path.unlink()
 
-                self._lock_file = open(self.lock_path, 'w')
+                self._lock_file = open(self.lock_path, "w")
                 _lock_file(self._lock_file)
                 self._lock_file.write(str(os.getpid()))
                 self._lock_file.flush()
                 return True
-            except (IOError, OSError):
+            except OSError:
                 time.sleep(0.1)
         return False
 
-    def release(self):
+    def release(self) -> None:
         """Release the lock."""
         if self._lock_file:
             try:
@@ -65,16 +69,16 @@ class FileLock:
                 self._lock_file.close()
                 if self.lock_path.exists():
                     self.lock_path.unlink()
-            except (IOError, OSError):
+            except OSError:
                 pass
             self._lock_file = None
 
-    def __enter__(self):
+    def __enter__(self) -> "FileLock":
         if not self.acquire():
-            raise IOError(f"Could not acquire lock on {self.lock_path} (timeout {self.timeout}s)")
+            raise OSError(f"Could not acquire lock on {self.lock_path} (timeout {self.timeout}s)")
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: Any) -> None:
         self.release()
 
 
@@ -98,7 +102,7 @@ def get_decisions_path() -> Path:
     return get_brain_dir() / "decisions.jsonl"
 
 
-def ensure_brain_dir():
+def ensure_brain_dir() -> None:
     """Create the brain directory if it doesn't exist."""
     get_brain_dir().mkdir(parents=True, exist_ok=True)
 

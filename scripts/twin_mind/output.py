@@ -1,13 +1,14 @@
 """Output helpers for twin-mind."""
 
-import sys
 import os
+import sys
 
 from twin_mind.constants import VERSION
 
 
 class Colors:
     """ANSI color codes for terminal output."""
+
     RESET = "\033[0m"
     RED = "\033[31m"
     GREEN = "\033[32m"
@@ -18,21 +19,21 @@ class Colors:
     _enabled = True
 
     @classmethod
-    def disable(cls):
+    def disable(cls) -> None:
         cls.RESET = cls.RED = cls.GREEN = ""
         cls.YELLOW = cls.BLUE = cls.BOLD = ""
         cls._enabled = False
 
     @classmethod
-    def is_enabled(cls):
+    def is_enabled(cls) -> bool:
         return cls._enabled
 
 
 def supports_color() -> bool:
     """Check if terminal supports color output."""
-    if os.environ.get('NO_COLOR'):
+    if os.environ.get("NO_COLOR"):
         return False
-    if not hasattr(sys.stdout, 'isatty'):
+    if not hasattr(sys.stdout, "isatty"):
         return False
     return sys.stdout.isatty()
 
@@ -68,24 +69,24 @@ class ProgressBar:
         self.width = width
         self.prefix = prefix
         self.current = 0
-        self._is_tty = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
+        self._is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
-    def update(self, n: int = 1):
+    def update(self, n: int = 1) -> None:
         self.current += n
         if self._is_tty:
             self._render()
 
-    def _render(self):
+    def _render(self) -> None:
         pct = self.current / self.total if self.total > 0 else 1
         filled = int(self.width * pct)
-        bar = '=' * filled + '>' + ' ' * (self.width - filled - 1)
-        line = f"\r{self.prefix}[{bar}] {self.current}/{self.total} ({pct*100:.0f}%)"
+        bar = "=" * filled + ">" + " " * (self.width - filled - 1)
+        line = f"\r{self.prefix}[{bar}] {self.current}/{self.total} ({pct * 100:.0f}%)"
         sys.stdout.write(line)
         sys.stdout.flush()
 
-    def finish(self):
+    def finish(self) -> None:
         if self._is_tty:
-            sys.stdout.write('\n')
+            sys.stdout.write("\n")
             sys.stdout.flush()
 
 
@@ -96,16 +97,16 @@ def format_size(bytes_size: int) -> str:
     elif bytes_size < 1024 * 1024:
         return f"{bytes_size / 1024:.1f} KB"
     else:
-        return f"{bytes_size / (1024*1024):.2f} MB"
+        return f"{bytes_size / (1024 * 1024):.2f} MB"
 
 
 def confirm(message: str) -> bool:
     """Ask user for confirmation."""
     response = input(f"{message} [y/N]: ").strip().lower()
-    return response == 'y'
+    return response == "y"
 
 
-def print_banner():
+def print_banner() -> None:
     """Print ASCII art banner."""
     banner = r"""
   ______         _          __  __ _           _

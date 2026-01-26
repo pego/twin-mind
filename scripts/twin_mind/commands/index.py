@@ -1,17 +1,18 @@
 """Index command for twin-mind."""
 
 import sys
+from typing import Any
 
-from twin_mind.config import get_config, get_extensions, get_skip_dirs, parse_size
-from twin_mind.fs import get_brain_dir, get_code_path, FileLock
-from twin_mind.git import is_git_repo, get_current_commit, get_changed_files, get_commits_behind
+from twin_mind.config import get_config
+from twin_mind.fs import FileLock, get_brain_dir, get_code_path
+from twin_mind.git import get_changed_files, get_commits_behind, get_current_commit, is_git_repo
 from twin_mind.index_state import load_index_state, save_index_state
-from twin_mind.indexing import index_files_full, index_files_incremental, collect_files
+from twin_mind.indexing import collect_files, index_files_full, index_files_incremental
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
-from twin_mind.output import Colors, supports_color, success, info, error, format_size
+from twin_mind.output import Colors, error, format_size, info, success, supports_color
 
 
-def cmd_index(args):
+def cmd_index(args: Any) -> None:
     """Index codebase into code store."""
     check_memvid()
     memvid_sdk = get_memvid_sdk()
@@ -58,7 +59,7 @@ def cmd_index(args):
                     return
 
     # Dry run mode
-    if getattr(args, 'dry_run', False) or getattr(args, 'status', False):
+    if getattr(args, "dry_run", False) or getattr(args, "status", False):
         if incremental:
             print("\n   Would reindex:")
             for f in changed_files[:10]:
@@ -77,13 +78,13 @@ def cmd_index(args):
     # Use file locking for writes
     with FileLock(code_path):
         # Determine mode
-        mode = 'open' if code_path.exists() else 'create'
+        mode = "open" if code_path.exists() else "create"
 
         if code_path.exists() and not incremental:
             print(info("Appending to existing code index..."))
             print("   (Use --fresh for clean reindex)")
 
-        with memvid_sdk.use('basic', str(code_path), mode=mode) as mem:
+        with memvid_sdk.use("basic", str(code_path), mode=mode) as mem:
             if incremental:
                 indexed = index_files_incremental(mem, changed_files, config, args)
             else:
