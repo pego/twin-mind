@@ -20,6 +20,7 @@ class TestCmdIndex:
     def test_index_not_initialized(self, tmp_path: Any, capsys: Any) -> None:
         """Test index when not initialized."""
         with (
+            patch("twin_mind.commands.index.check_memvid"),
             patch("twin_mind.commands.index.get_brain_dir", return_value=tmp_path / ".claude"),
             patch("twin_mind.commands.index.get_config", return_value={"output": {"color": False}}),
             patch("twin_mind.commands.index.supports_color", return_value=False),

@@ -20,6 +20,7 @@ class TestCmdStatus:
     def test_status_not_initialized(self, tmp_path: Any, capsys: Any) -> None:
         """Test status when not initialized."""
         with (
+            patch("twin_mind.commands.status.check_memvid"),
             patch("twin_mind.commands.status.get_code_path", return_value=tmp_path / "none.mv2"),
             patch("twin_mind.commands.status.get_memory_path", return_value=tmp_path / "none.mv2"),
             patch("twin_mind.commands.status.get_decisions_path", return_value=tmp_path / "none.jsonl"),
