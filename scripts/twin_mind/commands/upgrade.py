@@ -2,6 +2,7 @@
 
 import re
 import shutil
+import ssl
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -9,6 +10,25 @@ from pathlib import Path
 from twin_mind.config import get_config
 from twin_mind.constants import VERSION
 from twin_mind.output import Colors, supports_color, success, warning, error, info, confirm
+
+
+def _fetch_url(url: str) -> str:
+    """Fetch URL content with SSL fallback for macOS certificate issues."""
+    req = urllib.request.Request(url, headers={'User-Agent': 'twin-mind-upgrade'})
+
+    try:
+        # Try with default SSL context first
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return response.read().decode('utf-8')
+    except urllib.error.URLError as e:
+        if 'CERTIFICATE_VERIFY_FAILED' in str(e):
+            # Fallback: create unverified SSL context (common macOS issue)
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
+                return response.read().decode('utf-8')
+        raise
 
 
 def cmd_upgrade(args):
@@ -46,13 +66,8 @@ def cmd_upgrade(args):
     print(f"   Checking for updates...")
 
     try:
-        # First, try to get version from the script itself
-        req = urllib.request.Request(
-            f"{REPO_URL}/scripts/twin-mind.py",
-            headers={'User-Agent': 'twin-mind-upgrade'}
-        )
-        with urllib.request.urlopen(req, timeout=10) as response:
-            remote_script = response.read().decode('utf-8')
+        # Fetch the script to get version
+        remote_script = _fetch_url(f"{REPO_URL}/scripts/twin-mind.py")
 
         # Extract version from the script
         version_match = re.search(r'VERSION\s*=\s*["\']([^"\']+)["\']', remote_script)
@@ -123,13 +138,7 @@ def cmd_upgrade(args):
 
         # Update SKILL.md
         try:
-            req = urllib.request.Request(
-                f"{REPO_URL}/SKILL.md",
-                headers={'User-Agent': 'twin-mind-upgrade'}
-            )
-            with urllib.request.urlopen(req, timeout=10) as response:
-                skill_content = response.read().decode('utf-8')
-
+            skill_content = _fetch_url(f"{REPO_URL}/SKILL.md")
             SKILL_DIR.mkdir(parents=True, exist_ok=True)
             (SKILL_DIR / "SKILL.md").write_text(skill_content, encoding='utf-8')
             print(f"   {success('+')} Updated SKILL.md")
