@@ -130,7 +130,8 @@ def cmd_upgrade(args: Any) -> None:
             shutil.copy2(current_script, backup_script)
             print(f"   {success('+')} Backed up current version")
 
-        # Write new script
+        # Fetch and write new entry-point script
+        remote_script = _fetch_url(f"{REPO_URL}/scripts/twin-mind.py")
         current_script.write_text(remote_script, encoding="utf-8")
         current_script.chmod(0o755)
         print(f"   {success('+')} Updated twin-mind.py")
