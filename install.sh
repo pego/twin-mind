@@ -189,7 +189,7 @@ main() {
 
         # Command modules
         download_file "$REPO_URL/scripts/twin_mind/commands/__init__.py" "$INSTALL_DIR/twin_mind/commands/__init__.py"
-        for cmd in init index remember search ask recent stats status reset reindex prune context export doctor upgrade uninstall; do
+        for cmd in init index remember search ask recent stats status reset reindex prune context export doctor upgrade uninstall install_skills; do
             download_file "$REPO_URL/scripts/twin_mind/commands/${cmd}.py" "$INSTALL_DIR/twin_mind/commands/${cmd}.py"
         done
     fi
