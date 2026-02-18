@@ -106,7 +106,7 @@ download_file() {
 main() {
     echo ""
     echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║      Twin-Mind Installer v1.5.0        ║${NC}"
+    echo -e "${BLUE}║         Twin-Mind Installer            ║${NC}"
     echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -187,8 +187,9 @@ main() {
     success "  ✓ Installed twin-mind.py"
     success "  ✓ Installed twin_mind package"
 
-    # Step 7: Create version file
-    echo "1.5.0" > "$INSTALL_DIR/version.txt"
+    # Step 7: Create version file (read from constants.py — single source of truth)
+    VERSION=$(grep -m1 'VERSION' "$INSTALL_DIR/twin_mind/constants.py" | sed "s/.*VERSION *= *['\"]\\([^'\"]*\\)['\"].*/\\1/")
+    echo "$VERSION" > "$INSTALL_DIR/version.txt"
 
     # Step 8: Install skill
     info "Installing Claude Code skill..."
