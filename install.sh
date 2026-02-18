@@ -191,16 +191,26 @@ main() {
     VERSION=$(grep -m1 'VERSION' "$INSTALL_DIR/twin_mind/constants.py" | sed "s/.*VERSION *= *['\"]\\([^'\"]*\\)['\"].*/\\1/")
     echo "$VERSION" > "$INSTALL_DIR/version.txt"
 
-    # Step 8: Install skill
-    info "Installing Claude Code skill..."
-    mkdir -p "$SKILL_DIR"
+    # Step 8: Download SKILL.md to canonical location, then symlink into all detected agents
+    info "Installing skill for detected agents..."
 
+    # Save SKILL.md to ~/.twin-mind/SKILL.md (source of truth for symlinks)
     if [ -f "$SCRIPT_DIR/SKILL.md" ]; then
-        cp "$SCRIPT_DIR/SKILL.md" "$SKILL_DIR/SKILL.md"
+        cp "$SCRIPT_DIR/SKILL.md" "$INSTALL_DIR/SKILL.md"
     else
-        download_file "$REPO_URL/SKILL.md" "$SKILL_DIR/SKILL.md"
+        download_file "$REPO_URL/SKILL.md" "$INSTALL_DIR/SKILL.md"
     fi
-    success "  ✓ Installed skill to $SKILL_DIR"
+
+    # Run the skills installer (uses the source we just downloaded)
+    if [ -f "$SCRIPT_DIR/install-skills.sh" ]; then
+        bash "$SCRIPT_DIR/install-skills.sh"
+    else
+        # Download and run inline
+        SKILLS_INSTALLER=$(mktemp)
+        download_file "$REPO_URL/install-skills.sh" "$SKILLS_INSTALLER"
+        bash "$SKILLS_INSTALLER"
+        rm -f "$SKILLS_INSTALLER"
+    fi
 
     # Step 9: Add shell alias
     info "Configuring shell alias..."
