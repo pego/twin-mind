@@ -40,7 +40,7 @@ def cmd_upgrade(args: Any) -> None:
 
     REPO_URL = "https://raw.githubusercontent.com/pego/twin-mind/main"
     INSTALL_DIR = Path.home() / ".twin-mind"
-    SKILL_DIR = Path.home() / ".claude" / "skills" / "twin-mind"
+    SKILL_DIR = Path.home() / ".agents" / "skills" / "twin-mind"
 
     print("\nTwin-Mind Upgrade")
     print("=" * 50)

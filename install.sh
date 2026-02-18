@@ -201,15 +201,16 @@ main() {
     VERSION=$(grep -m1 'VERSION' "$INSTALL_DIR/twin_mind/constants.py" | sed "s/.*VERSION *= *['\"]\\([^'\"]*\\)['\"].*/\\1/")
     echo "$VERSION" > "$INSTALL_DIR/version.txt"
 
-    # Step 8: Download SKILL.md + install-skills.sh to canonical location,
-    #         then symlink into all detected agents
+    # Step 8: Download SKILL.md + install-skills.sh, then symlink into all detected agents
     info "Installing skill for detected agents..."
 
-    # Save SKILL.md to ~/.twin-mind/SKILL.md (source of truth for symlinks)
+    # Save SKILL.md to ~/.agents/skills/twin-mind/ (canonical, matches vercel-labs/skills)
+    AGENTS_SKILL_DIR="$HOME/.agents/skills/twin-mind"
+    mkdir -p "$AGENTS_SKILL_DIR"
     if [ -f "$SCRIPT_DIR/SKILL.md" ]; then
-        cp "$SCRIPT_DIR/SKILL.md" "$INSTALL_DIR/SKILL.md"
+        cp "$SCRIPT_DIR/SKILL.md" "$AGENTS_SKILL_DIR/SKILL.md"
     else
-        download_file "$REPO_URL/SKILL.md" "$INSTALL_DIR/SKILL.md"
+        download_file "$REPO_URL/SKILL.md" "$AGENTS_SKILL_DIR/SKILL.md"
     fi
 
     # Save install-skills.sh to ~/.twin-mind/ so `twin-mind install-skills` can use it

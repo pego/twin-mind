@@ -1,13 +1,18 @@
 #!/bin/bash
 #
 # Twin-Mind Skills Installer
-# Symlinks the twin-mind skill into every detected AI coding agent/IDE.
+# Installs the twin-mind skill following the vercel-labs/skills convention:
+#
+#   Canonical dir:  ~/.agents/skills/twin-mind/   (contains SKILL.md)
+#   Per-IDE links:  ~/.claude/skills/twin-mind  ->  ~/.agents/skills/twin-mind
+#                   ~/.cursor/skills/twin-mind  ->  ~/.agents/skills/twin-mind
+#                   ... (one symlink per detected agent)
 #
 # Usage:
 #   curl -sSL https://raw.githubusercontent.com/pego/twin-mind/main/install-skills.sh | bash
 #   ./install-skills.sh            # install for all detected agents
 #   ./install-skills.sh --dry-run  # preview without making changes
-#   ./install-skills.sh --update   # refresh SKILL.md from GitHub, then reinstall
+#   ./install-skills.sh --update   # refresh SKILL.md, then reinstall
 #
 
 set -e
@@ -23,8 +28,9 @@ NC='\033[0m'
 # ── Config ────────────────────────────────────────────────────────────────────
 REPO_URL="https://raw.githubusercontent.com/pego/twin-mind/main"
 SKILL_NAME="twin-mind"
-# Canonical source — downloaded once, symlinked everywhere
-SKILL_SOURCE="$HOME/.twin-mind/SKILL.md"
+# Canonical location — matches vercel-labs/skills convention
+AGENTS_SKILLS_DIR="$HOME/.agents/skills"
+SKILL_CANONICAL="$AGENTS_SKILLS_DIR/$SKILL_NAME"   # the directory being symlinked
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 info()    { echo -e "${BLUE}$1${NC}"; }
@@ -56,30 +62,37 @@ download() {
 }
 
 # ── Detection ─────────────────────────────────────────────────────────────────
-# Returns 0 if the agent is present (config dir exists OR binary in PATH)
 detected() {
     local check="$1"
     [ -d "$check" ] || command -v "$check" >/dev/null 2>&1
 }
 
-# ── Install for one agent ─────────────────────────────────────────────────────
+# ── Install symlink for one agent ─────────────────────────────────────────────
+# Creates: <skills_dir>/twin-mind  ->  ~/.agents/skills/twin-mind
 install_skill() {
     local label="$1"
     local skills_dir="$2"
-    local target="$skills_dir/$SKILL_NAME/SKILL.md"
+    local target="$skills_dir/$SKILL_NAME"
 
     if $DRY_RUN; then
-        echo -e "  ${BLUE}[dry-run]${NC} $label → $target"
+        echo -e "  ${BLUE}[dry-run]${NC} $label"
+        echo -e "           $target -> $SKILL_CANONICAL"
         return
     fi
 
-    mkdir -p "$skills_dir/$SKILL_NAME"
+    mkdir -p "$skills_dir"
 
-    # Remove stale file or broken symlink
-    [ -e "$target" ] || [ -L "$target" ] && rm -f "$target"
+    if [ -L "$target" ]; then
+        # Replace existing symlink
+        rm "$target"
+    elif [ -d "$target" ] && [ ! -L "$target" ]; then
+        # Real directory — don't clobber, skip with warning
+        warn "$label: $target is a real directory, skipping"
+        return
+    fi
 
-    ln -s "$SKILL_SOURCE" "$target"
-    success "$label"
+    ln -s "$SKILL_CANONICAL" "$target"
+    success "$label  ($target)"
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -91,12 +104,12 @@ main() {
 
     $DRY_RUN && warn "Dry-run mode — no changes will be made" && echo ""
 
-    # ── Ensure source SKILL.md exists ─────────────────────────────────────────
-    if ! $DRY_RUN && { $UPDATE || [ ! -f "$SKILL_SOURCE" ]; }; then
-        info "Downloading SKILL.md from GitHub..."
-        mkdir -p "$(dirname "$SKILL_SOURCE")"
-        download "$REPO_URL/SKILL.md" "$SKILL_SOURCE"
-        success "SKILL.md saved to $SKILL_SOURCE"
+    # ── Ensure canonical skill directory and SKILL.md exist ───────────────────
+    if ! $DRY_RUN && { $UPDATE || [ ! -f "$SKILL_CANONICAL/SKILL.md" ]; }; then
+        info "Downloading SKILL.md → $SKILL_CANONICAL/"
+        mkdir -p "$SKILL_CANONICAL"
+        download "$REPO_URL/SKILL.md" "$SKILL_CANONICAL/SKILL.md"
+        success "Saved to $SKILL_CANONICAL/SKILL.md"
         echo ""
     fi
 
@@ -107,7 +120,6 @@ main() {
     installed=0
     skipped=0
 
-    # Helper: try to install, count result
     try() {
         local label="$1" detection="$2" skills_dir="$3"
         if detected "$detection"; then
@@ -120,8 +132,6 @@ main() {
     }
 
     # ── Agent list ────────────────────────────────────────────────────────────
-    # Format: try "Label" "detection (dir or binary)" "global skills dir"
-
     try "Claude Code"      "$HOME/.claude"                    "$HOME/.claude/skills"
     try "Cursor"           "$HOME/.cursor"                    "$HOME/.cursor/skills"
     try "Windsurf"         "$HOME/.codeium/windsurf"          "$HOME/.codeium/windsurf/skills"
@@ -144,19 +154,16 @@ main() {
     if [ "$installed" -eq 0 ]; then
         warn "No agents detected."
         echo ""
-        echo "  Install an AI coding tool and re-run:"
-        echo "    bash install-skills.sh"
-        echo ""
         echo "  Supported: Claude Code, Cursor, Windsurf, Cline, Continue,"
         echo "             Roo Code, Kilo Code, Kiro, Augment, Copilot,"
         echo "             Gemini CLI, Codex, Goose, OpenCode"
     else
         echo -e "  ${GREEN}Installed: $installed${NC}  |  Skipped: $skipped"
         echo ""
-        echo "  Skill source: $SKILL_SOURCE"
+        echo "  Canonical: $SKILL_CANONICAL/"
         echo ""
-        echo "  To update the skill:  bash install-skills.sh --update"
-        echo "  To preview changes:   bash install-skills.sh --dry-run"
+        echo "  To update:   twin-mind install-skills --update"
+        echo "  To preview:  twin-mind install-skills --dry-run"
     fi
 
     echo ""

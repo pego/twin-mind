@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from twin_mind.output import error, info, success, warning
+from twin_mind.output import error, info
 from twin_mind.commands.upgrade import _fetch_url
 
 REPO_URL = "https://raw.githubusercontent.com/pego/twin-mind/main"
