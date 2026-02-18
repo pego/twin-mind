@@ -57,6 +57,7 @@ def cmd_search(args: Any) -> None:
     find_kwargs = build_find_kwargs(args.top_k, snippet_chars)
 
     # Search code
+    dir_scope = getattr(args, "dir_scope", None)
     if args.scope in ("code", "all") and code_path.exists():
         with memvid_sdk.use("basic", str(code_path), mode="open") as mem:
             try:
@@ -65,6 +66,12 @@ def cmd_search(args: Any) -> None:
                 # Fallback if memvid doesn't support adaptive parameter
                 response = mem.find(args.query, k=args.top_k, snippet_chars=snippet_chars)
             for hit in response.get("hits", []):
+                if dir_scope:
+                    uri = hit.get("uri", "").replace("file://", "")
+                    title = hit.get("title", "")
+                    scope_norm = dir_scope.rstrip("/") + "/"
+                    if not (uri.startswith(scope_norm) or title.startswith(scope_norm)):
+                        continue
                 results.append(("code", hit))
 
     # Search local memory (memory.mv2)
@@ -127,7 +134,8 @@ def cmd_search(args: Any) -> None:
         print(json.dumps(output, indent=2))
         return
 
-    print(f"\nResults for: '{args.query}' (in: {args.scope})\n")
+    scope_info = f" [scope: {dir_scope}]" if dir_scope else ""
+    print(f"\nResults for: '{args.query}' (in: {args.scope}){scope_info}\n")
     print("=" * 60)
 
     for i, (source, hit) in enumerate(results, 1):

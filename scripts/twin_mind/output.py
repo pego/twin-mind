@@ -2,6 +2,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 from twin_mind.constants import VERSION
 
@@ -104,6 +105,15 @@ def confirm(message: str) -> bool:
     """Ask user for confirmation."""
     response = input(f"{message} [y/N]: ").strip().lower()
     return response == "y"
+
+
+def warn_if_large(path: Path, max_mb: float, label: str) -> None:
+    """Print a warning if the file at path exceeds max_mb."""
+    if not path.exists():
+        return
+    size_mb = path.stat().st_size / (1024 * 1024)
+    if size_mb > max_mb:
+        print(warning(f"{label} is {size_mb:.1f}MB (recommended max: {max_mb:.0f}MB). Run: twin-mind doctor"))
 
 
 def print_banner() -> None:

@@ -1,11 +1,12 @@
 """Constants for twin-mind."""
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 # Directory and file names
 BRAIN_DIR = ".claude"
 CODE_FILE = "code.mv2"
 MEMORY_FILE = "memory.mv2"
+DECISIONS_MV2_FILE = "decisions.mv2"
 INDEX_STATE_FILE = "index-state.json"
 GITIGNORE_FILE = ".gitignore"
 
@@ -14,12 +15,14 @@ GITIGNORE_CONTENT = """# Twin-Mind gitignore
 # code.mv2 - Generated codebase index (regeneratable)
 # index-state.json - Machine-specific index metadata
 # memory.mv2 - Local/personal memories (not shared)
+# decisions.mv2 - Semantic index (regeneratable from decisions.jsonl)
 #
 # decisions.jsonl IS versioned - shared team decisions (JSONL = mergeable)
 
 code.mv2
 index-state.json
 memory.mv2
+decisions.mv2
 """
 
 # Default extensions to index
@@ -127,5 +130,14 @@ DEFAULT_CONFIG = {
     "memory": {
         "share_memories": False,  # If True, memories go to shared decisions.jsonl
         "dedupe": True,  # Enable SimHash deduplication
+    },
+    "decisions": {
+        "build_semantic_index": True,
+    },
+    "maintenance": {
+        "size_warnings": True,
+        "code_max_mb": 50,
+        "memory_max_mb": 15,
+        "decisions_max_mb": 5,
     },
 }

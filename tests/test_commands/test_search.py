@@ -173,6 +173,127 @@ class TestCmdSearch:
         captured = capsys.readouterr()
         assert "Remember this" in captured.out or "memory" in captured.out.lower()
 
+    def test_search_scope_filters_results(
+        self, tmp_path: Any, mock_memvid: MagicMock, capsys: Any
+    ) -> None:
+        """Results outside dir_scope are excluded."""
+        brain_dir = tmp_path / ".claude"
+        brain_dir.mkdir()
+        code_path = brain_dir / "code.mv2"
+        code_path.touch()
+
+        # URI is outside src/auth/ scope
+        mock_memvid.use.return_value.__enter__.return_value.find.return_value = {
+            "hits": [
+                {
+                    "title": "other/module.py",
+                    "text": "def auth(): pass",
+                    "score": 0.9,
+                    "uri": "other/module.py",
+                }
+            ]
+        }
+
+        with (
+            patch("twin_mind.commands.search.get_code_path", return_value=code_path),
+            patch("twin_mind.commands.search.get_memory_path", return_value=tmp_path / "none.mv2"),
+            patch("twin_mind.commands.search.get_memvid_sdk", return_value=mock_memvid),
+            patch("twin_mind.commands.search.check_memvid"),
+            patch("twin_mind.commands.search.get_config", return_value={
+                "output": {"color": False},
+                "index": {"adaptive_retrieval": False},
+            }),
+            patch("twin_mind.commands.search.check_stale_index"),
+            patch("twin_mind.commands.search.search_shared_memories", return_value=[]),
+        ):
+            from twin_mind.commands.search import cmd_search
+
+            args = MockArgs(
+                query="auth", scope="code", top_k=5, json=False,
+                context=None, full=False, no_adaptive=False, dir_scope="src/auth/",
+            )
+            cmd_search(args)
+
+        captured = capsys.readouterr()
+        assert "No results" in captured.out
+
+    def test_search_scope_allows_matching_results(
+        self, tmp_path: Any, mock_memvid: MagicMock, capsys: Any
+    ) -> None:
+        """Results inside dir_scope pass through."""
+        brain_dir = tmp_path / ".claude"
+        brain_dir.mkdir()
+        code_path = brain_dir / "code.mv2"
+        code_path.touch()
+
+        mock_memvid.use.return_value.__enter__.return_value.find.return_value = {
+            "hits": [
+                {
+                    "title": "src/auth/login.py",
+                    "text": "def login(): pass",
+                    "score": 0.9,
+                    "uri": "src/auth/login.py",
+                }
+            ]
+        }
+
+        with (
+            patch("twin_mind.commands.search.get_code_path", return_value=code_path),
+            patch("twin_mind.commands.search.get_memory_path", return_value=tmp_path / "none.mv2"),
+            patch("twin_mind.commands.search.get_memvid_sdk", return_value=mock_memvid),
+            patch("twin_mind.commands.search.check_memvid"),
+            patch("twin_mind.commands.search.get_config", return_value={
+                "output": {"color": False},
+                "index": {"adaptive_retrieval": False},
+            }),
+            patch("twin_mind.commands.search.check_stale_index"),
+            patch("twin_mind.commands.search.search_shared_memories", return_value=[]),
+        ):
+            from twin_mind.commands.search import cmd_search
+
+            args = MockArgs(
+                query="auth", scope="code", top_k=5, json=False,
+                context=None, full=False, no_adaptive=False, dir_scope="src/auth/",
+            )
+            cmd_search(args)
+
+        captured = capsys.readouterr()
+        assert "src/auth/login.py" in captured.out
+        assert "[scope: src/auth/]" in captured.out
+
+    def test_search_no_dir_scope_passes_all(
+        self, tmp_path: Any, mock_memvid: MagicMock, capsys: Any
+    ) -> None:
+        """When dir_scope is None, no filtering is applied."""
+        brain_dir = tmp_path / ".claude"
+        brain_dir.mkdir()
+        code_path = brain_dir / "code.mv2"
+        code_path.touch()
+
+        with (
+            patch("twin_mind.commands.search.get_code_path", return_value=code_path),
+            patch("twin_mind.commands.search.get_memory_path", return_value=tmp_path / "none.mv2"),
+            patch("twin_mind.commands.search.get_memvid_sdk", return_value=mock_memvid),
+            patch("twin_mind.commands.search.check_memvid"),
+            patch("twin_mind.commands.search.get_config", return_value={
+                "output": {"color": False},
+                "index": {"adaptive_retrieval": False},
+            }),
+            patch("twin_mind.commands.search.check_stale_index"),
+            patch("twin_mind.commands.search.search_shared_memories", return_value=[]),
+        ):
+            from twin_mind.commands.search import cmd_search
+
+            args = MockArgs(
+                query="test", scope="code", top_k=5, json=False,
+                context=None, full=False, no_adaptive=False, dir_scope=None,
+            )
+            cmd_search(args)
+
+        captured = capsys.readouterr()
+        assert "test.py" in captured.out
+        assert "[scope:" not in captured.out
+
     def test_search_includes_shared_memories(
         self, tmp_path: Any, capsys: Any
     ) -> None:

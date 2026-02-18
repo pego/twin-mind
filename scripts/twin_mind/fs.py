@@ -9,6 +9,7 @@ from typing import Any, Optional, TextIO
 from twin_mind.constants import (
     BRAIN_DIR,
     CODE_FILE,
+    DECISIONS_MV2_FILE,
     GITIGNORE_CONTENT,
     GITIGNORE_FILE,
     MEMORY_FILE,
@@ -100,6 +101,11 @@ def get_memory_path() -> Path:
 def get_decisions_path() -> Path:
     """Get path to shared decisions file (JSONL format)."""
     return get_brain_dir() / "decisions.jsonl"
+
+
+def get_decisions_mv2_path() -> Path:
+    """Get path to semantic index for shared decisions (regeneratable from JSONL)."""
+    return get_brain_dir() / DECISIONS_MV2_FILE
 
 
 def ensure_brain_dir() -> None:

@@ -148,7 +148,7 @@ twin-mind doctor --rebuild    # Rebuild indexes (after >20% deletions)
 ## Phase 2: Memory Quality
 
 ### 2.1 Scope-Based Search
-**Status:** 🔲 Not Started
+**Status:** ✅ Completed (v1.7.0)
 **Impact:** Faster targeted queries
 **Effort:** Low
 
@@ -161,7 +161,7 @@ twin-mind search "auth" --in code --scope src/auth/
 ---
 
 ### 2.2 Semantic Search for Shared Decisions
-**Status:** 🔲 Not Started
+**Status:** ✅ Completed (v1.7.0)
 **Impact:** Better decision discovery
 **Effort:** Medium
 
@@ -173,7 +173,7 @@ Build `decisions.mv2` index alongside `decisions.jsonl`:
 ---
 
 ### 2.3 Size Monitoring & Warnings
-**Status:** 🔲 Not Started
+**Status:** ✅ Completed (v1.7.0)
 **Impact:** Better UX
 **Effort:** Low
 

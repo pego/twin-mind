@@ -5,9 +5,10 @@ from datetime import datetime
 from typing import Any
 
 from twin_mind.config import get_config
-from twin_mind.fs import get_memory_path
+from twin_mind.fs import get_decisions_path, get_memory_path
 from twin_mind.git import get_git_author
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
+from twin_mind.output import warn_if_large
 from twin_mind.shared_memory import write_shared_memory
 
 
@@ -38,6 +39,12 @@ def cmd_remember(args: Any) -> None:
             author = get_git_author()
             print(f"Shared{tag_str}: {title}")
             print(f"   Added to decisions.jsonl (by {author})")
+            if config.get("maintenance", {}).get("size_warnings", True):
+                warn_if_large(
+                    get_decisions_path(),
+                    config.get("maintenance", {}).get("decisions_max_mb", 5),
+                    "Shared decisions",
+                )
         else:
             sys.exit(1)
     else:
@@ -82,3 +89,9 @@ def cmd_remember(args: Any) -> None:
         dedupe_note = " (dedupe)" if use_dedupe else ""
         print(f"Remembered{tag_str}: {title}")
         print(f"   Saved to local memory.mv2{dedupe_note}")
+        if config.get("maintenance", {}).get("size_warnings", True):
+            warn_if_large(
+                memory_path,
+                config.get("maintenance", {}).get("memory_max_mb", 15),
+                "Memory store",
+            )

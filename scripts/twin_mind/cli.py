@@ -104,6 +104,10 @@ Repository: https://github.com/pego/twin-mind
     p_search.add_argument(
         "--no-adaptive", action="store_true", help="Disable adaptive retrieval (use fixed top-k)"
     )
+    p_search.add_argument(
+        "--scope", dest="dir_scope", metavar="PATH",
+        help="Limit code search to a subdirectory (e.g., src/auth/)",
+    )
 
     # ask
     p_ask = subparsers.add_parser("ask", help="Ask a question")

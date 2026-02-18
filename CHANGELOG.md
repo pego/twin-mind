@@ -2,6 +2,33 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.7.0] - 2026-02-18
+
+### Added
+- **Scope-Based Search** (`--scope PATH`): Limit code search results to a subdirectory
+  - `twin-mind search "auth" --in code --scope src/auth/` filters hits to that path
+  - Output header shows active scope: `Results for: '...' (in: code) [scope: src/auth/]`
+  - No-op when `--scope` is omitted; all existing searches unchanged
+
+- **Semantic Search for Shared Decisions**: `decisions.mv2` index built alongside `decisions.jsonl`
+  - JSONL remains the source of truth (git-versioned, merge-friendly)
+  - MV2 is gitignored and regeneratable from JSONL
+  - `build_decisions_index()` rebuilds MV2 from scratch; called automatically on full reindex
+  - `write_shared_memory()` incrementally updates MV2 when it already exists (best-effort)
+  - `search_shared_memories()` uses semantic search when MV2 exists, lazily builds it if not, falls back to text matching
+  - New `decisions.build_semantic_index` config key (default: `true`)
+
+- **Size Monitoring & Warnings**: Post-operation warnings when stores exceed recommended thresholds
+  - `twin-mind index` warns if `code.mv2` > 50 MB
+  - `twin-mind remember` warns if `memory.mv2` > 15 MB or `decisions.jsonl` > 5 MB
+  - Warning message includes `Run: twin-mind doctor` hint
+  - Controlled by `maintenance.size_warnings` config key (default: `true`)
+  - Thresholds configurable via `maintenance.code_max_mb`, `memory_max_mb`, `decisions_max_mb`
+
+### Changed
+- `DEFAULT_CONFIG` now includes `decisions` and `maintenance` sections
+- `GITIGNORE_CONTENT` now lists `decisions.mv2` as gitignored
+
 ## [1.5.0] - 2025-01-26
 
 ### Added

@@ -4,12 +4,13 @@ import sys
 from typing import Any
 
 from twin_mind.config import get_config
-from twin_mind.fs import FileLock, get_brain_dir, get_code_path
+from twin_mind.fs import FileLock, get_brain_dir, get_code_path, get_decisions_path
+from twin_mind.shared_memory import build_decisions_index
 from twin_mind.git import get_changed_files, get_commits_behind, get_current_commit, is_git_repo
 from twin_mind.index_state import load_index_state, save_index_state
 from twin_mind.indexing import collect_files, index_files_full, index_files_incremental
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
-from twin_mind.output import Colors, error, format_size, info, success, supports_color
+from twin_mind.output import Colors, error, format_size, info, success, supports_color, warn_if_large
 
 
 def cmd_index(args: Any) -> None:
@@ -97,3 +98,12 @@ def cmd_index(args: Any) -> None:
 
     print(f"\n{success('Done!')} Indexed {indexed} files")
     print(f"   Size: {format_size(code_path.stat().st_size)}")
+
+    if config.get("maintenance", {}).get("size_warnings", True):
+        warn_if_large(code_path, config.get("maintenance", {}).get("code_max_mb", 50), "Code index")
+
+    # Rebuild decisions semantic index on full reindex (not incremental)
+    if not incremental and config.get("decisions", {}).get("build_semantic_index", True):
+        decisions_path = get_decisions_path()
+        if decisions_path.exists():
+            build_decisions_index()

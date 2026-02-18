@@ -2,7 +2,7 @@
 
 import sys
 from io import StringIO
-from typing import Generator
+from typing import Any, Generator
 
 import pytest
 
@@ -16,6 +16,7 @@ from twin_mind.output import (
     info,
     success,
     supports_color,
+    warn_if_large,
     warning,
 )
 
@@ -176,6 +177,47 @@ class TestSupportsColor:
         # Only if NO_COLOR is set (not empty string)
         monkeypatch.delenv("NO_COLOR", raising=False)
         # Result depends on whether stdout is a tty
+
+
+class TestWarnIfLarge:
+    """Tests for warn_if_large function."""
+
+    def setup_method(self) -> None:
+        """Re-enable colors before each test."""
+        Colors.RESET = "\033[0m"
+        Colors.YELLOW = "\033[33m"
+        Colors._enabled = True
+
+    def test_warns_when_over_threshold(self, tmp_path: Any, capsys: Any) -> None:
+        """Test that a warning is printed when file exceeds max_mb."""
+        large_file = tmp_path / "big.mv2"
+        # Write 2MB of data (threshold is 1MB)
+        large_file.write_bytes(b"x" * (2 * 1024 * 1024))
+
+        warn_if_large(large_file, max_mb=1.0, label="Test store")
+
+        captured = capsys.readouterr()
+        assert "Test store" in captured.out
+        assert "twin-mind doctor" in captured.out
+
+    def test_silent_when_under_threshold(self, tmp_path: Any, capsys: Any) -> None:
+        """Test no output when file is under threshold."""
+        small_file = tmp_path / "small.mv2"
+        small_file.write_bytes(b"x" * 100)
+
+        warn_if_large(small_file, max_mb=1.0, label="Test store")
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_silent_when_file_missing(self, tmp_path: Any, capsys: Any) -> None:
+        """Test no output when file does not exist."""
+        missing = tmp_path / "nonexistent.mv2"
+
+        warn_if_large(missing, max_mb=1.0, label="Test store")
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
 
 
 class TestConfirm:
