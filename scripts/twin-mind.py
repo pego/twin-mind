@@ -24,14 +24,14 @@ Usage:
 import sys
 from pathlib import Path
 
-VERSION = "1.7.0"
+# Ensure the package directory is in the path so twin_mind can be imported
+_package_dir = Path(__file__).parent
+if str(_package_dir) not in sys.path:
+    sys.path.insert(0, str(_package_dir))
 
-# Ensure the package directory is in the path
+from twin_mind.constants import VERSION  # noqa: E402 — single source of truth
+
 if __name__ == "__main__":
-    package_dir = Path(__file__).parent
-    if str(package_dir) not in sys.path:
-        sys.path.insert(0, str(package_dir))
-
     from twin_mind.cli import main
 
     main()

@@ -69,11 +69,11 @@ def cmd_upgrade(args: Any) -> None:
     print("   Checking for updates...")
 
     try:
-        # Fetch the script to get version
-        remote_script = _fetch_url(f"{REPO_URL}/scripts/twin-mind.py")
+        # Fetch constants.py — the single source of truth for VERSION
+        remote_constants = _fetch_url(f"{REPO_URL}/scripts/twin_mind/constants.py")
 
-        # Extract version from the script
-        version_match = re.search(r'VERSION\s*=\s*["\']([^"\']+)["\']', remote_script)
+        # Extract version from constants.py
+        version_match = re.search(r'VERSION\s*=\s*["\']([^"\']+)["\']', remote_constants)
         if not version_match:
             print(error("Could not determine latest version"))
             return
