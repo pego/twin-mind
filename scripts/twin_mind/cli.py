@@ -11,6 +11,7 @@ from twin_mind.commands import (
     cmd_export,
     cmd_index,
     cmd_init,
+    cmd_install_skills,
     cmd_prune,
     cmd_recent,
     cmd_reindex,
@@ -173,6 +174,17 @@ Repository: https://github.com/pego/twin-mind
         "--rebuild", action="store_true", help="Rebuild indexes (recommended after >20%% deletions)"
     )
 
+    # install-skills
+    p_install_skills = subparsers.add_parser(
+        "install-skills", help="Symlink twin-mind skill into all detected AI coding agents"
+    )
+    p_install_skills.add_argument(
+        "--dry-run", action="store_true", help="Preview without making changes"
+    )
+    p_install_skills.add_argument(
+        "--update", action="store_true", help="Re-download SKILL.md before installing"
+    )
+
     # upgrade
     p_upgrade = subparsers.add_parser("upgrade", help="Check for updates and upgrade twin-mind")
     p_upgrade.add_argument(
@@ -209,6 +221,7 @@ Repository: https://github.com/pego/twin-mind
         "uninstall": cmd_uninstall,
         "doctor": cmd_doctor,
         "upgrade": cmd_upgrade,
+        "install-skills": cmd_install_skills,
     }
 
     # Auto-init for commands that need it

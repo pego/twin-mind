@@ -194,6 +194,7 @@ def cmd_upgrade(args: Any) -> None:
             "doctor",
             "upgrade",
             "uninstall",
+            "install_skills",
         ]
         for module in cmd_modules:
             try:
@@ -208,14 +209,24 @@ def cmd_upgrade(args: Any) -> None:
         version_file.write_text(latest_version)
         print(f"   {success('+')} Updated version.txt")
 
-        # Update SKILL.md
+        # Update SKILL.md (canonical copy in ~/.twin-mind/)
         try:
             skill_content = _fetch_url(f"{REPO_URL}/SKILL.md")
-            SKILL_DIR.mkdir(parents=True, exist_ok=True)
-            (SKILL_DIR / "SKILL.md").write_text(skill_content, encoding="utf-8")
+            INSTALL_DIR.mkdir(parents=True, exist_ok=True)
+            (INSTALL_DIR / "SKILL.md").write_text(skill_content, encoding="utf-8")
             print(f"   {success('+')} Updated SKILL.md")
         except Exception as e:
             print(f"   {warning(f'Could not update SKILL.md: {e}')}")
+
+        # Update install-skills.sh
+        try:
+            skills_sh = _fetch_url(f"{REPO_URL}/install-skills.sh")
+            skills_sh_path = INSTALL_DIR / "install-skills.sh"
+            skills_sh_path.write_text(skills_sh, encoding="utf-8")
+            skills_sh_path.chmod(0o755)
+            print(f"   {success('+')} Updated install-skills.sh")
+        except Exception as e:
+            print(f"   {warning(f'Could not update install-skills.sh: {e}')}")
 
         print(f"\n{success('Upgrade complete!')}")
         print(f"   Now running version {latest_version}")
