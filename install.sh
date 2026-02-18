@@ -127,11 +127,21 @@ main() {
     # Step 2: Check if already installed
     if [ -d "$INSTALL_DIR" ]; then
         warn "  Twin-mind already installed at $INSTALL_DIR"
-        read -p "  Reinstall? [y/N] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            info "Installation cancelled."
-            exit 0
+        if [ -t 0 ]; then
+            # Interactive terminal — ask the user
+            read -p "  Reinstall? [y/N] " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                info "Installation cancelled."
+                exit 0
+            fi
+        else
+            # Running via pipe (curl | bash) — auto-reinstall since the user
+            # explicitly invoked the installer
+            warn "  Running via pipe — reinstalling automatically."
+            warn "  To cancel next time, download the script first:"
+            warn "    curl -sSL https://raw.githubusercontent.com/pego/twin-mind/main/install.sh -o install.sh && bash install.sh"
+            echo
         fi
         rm -rf "$INSTALL_DIR"
     fi
