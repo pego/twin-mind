@@ -209,11 +209,11 @@ def cmd_upgrade(args: Any) -> None:
         version_file.write_text(latest_version)
         print(f"   {success('+')} Updated version.txt")
 
-        # Update SKILL.md (canonical copy in ~/.twin-mind/)
+        # Update SKILL.md in canonical location (~/.agents/skills/twin-mind/)
         try:
             skill_content = _fetch_url(f"{REPO_URL}/SKILL.md")
-            INSTALL_DIR.mkdir(parents=True, exist_ok=True)
-            (INSTALL_DIR / "SKILL.md").write_text(skill_content, encoding="utf-8")
+            SKILL_DIR.mkdir(parents=True, exist_ok=True)
+            (SKILL_DIR / "SKILL.md").write_text(skill_content, encoding="utf-8")
             print(f"   {success('+')} Updated SKILL.md")
         except Exception as e:
             print(f"   {warning(f'Could not update SKILL.md: {e}')}")
