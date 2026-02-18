@@ -2,6 +2,30 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.8.0] - 2026-02-18
+
+### Added
+- **`twin-mind install-skills`**: New CLI command to symlink the twin-mind skill into
+  all detected AI coding agents (delegates to `install-skills.sh`)
+  - `--dry-run` — preview symlinks without making changes
+  - `--update` — re-download `SKILL.md` before installing
+
+- **`install-skills.sh`**: Standalone multi-IDE skill installer
+  - Detects 14 agents: Claude Code, Cursor, Windsurf, Cline, Continue, Roo Code,
+    Kilo Code, Kiro, Augment, GitHub Copilot, Gemini CLI, Codex, Goose, OpenCode
+  - Symlinks `~/.twin-mind/SKILL.md` into each detected agent's global skills directory
+  - Detection by config directory presence or binary in PATH
+  - Can be run standalone: `curl -sSL .../install-skills.sh | bash`
+
+### Fixed
+- **Version single source of truth**: `scripts/twin-mind.py` now imports `VERSION`
+  from `twin_mind.constants` instead of hardcoding it; `upgrade.py` reads
+  `constants.py` from GitHub instead of `twin-mind.py` for version detection
+- **`install.sh`** no longer hardcodes the version in `version.txt` — reads it
+  from the downloaded `constants.py` at install time
+- **`upgrade`** now fetches `install-skills.sh` and `SKILL.md` alongside Python
+  modules so they stay current after an upgrade
+
 ## [1.7.0] - 2026-02-18
 
 ### Added
