@@ -22,7 +22,7 @@ NC='\033[0m' # No Color
 INSTALL_DIR="$HOME/.twin-mind"
 SKILL_DIR="$HOME/.claude/skills/twin-mind"
 REPO_URL="https://raw.githubusercontent.com/pego/twin-mind/main"
-MIN_PYTHON_VERSION="3.8"
+MIN_PYTHON_VERSION="3.9"
 
 # Helper functions
 info() { echo -e "${BLUE}$1${NC}"; }

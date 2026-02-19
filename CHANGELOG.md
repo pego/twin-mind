@@ -2,6 +2,23 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.8.2] - 2026-02-19
+
+### Fixed
+- **Upgrade hardening** (`twin-mind upgrade`):
+  - Enforces trusted download sources (HTTPS + `raw.githubusercontent.com` + official repository path)
+  - Removes insecure TLS bypass behavior for certificate failures
+  - Pre-downloads all upgrade artifacts before mutating local installation
+  - Applies package/script updates from a complete in-memory bundle to avoid partial network updates
+  - Restores both `twin-mind.py` and `twin_mind/` package from backups when upgrade fails mid-write
+
+### Changed
+- **Python support policy**:
+  - Minimum supported Python version is now `3.9+`
+  - Installer minimum Python check updated to `3.9+`
+  - CI test matrix updated to `3.9`, `3.10`, `3.12` on Linux/macOS
+  - README badge updated to Python 3.9+
+
 ## [1.8.1] - 2026-02-19
 
 ### Fixed

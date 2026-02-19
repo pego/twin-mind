@@ -2,34 +2,111 @@
 
 import re
 import shutil
-import ssl
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any, Dict, Tuple
+from urllib.parse import urlparse
 
 from twin_mind.config import get_config
 from twin_mind.constants import VERSION
 from twin_mind.output import Colors, confirm, error, info, success, supports_color, warning
 
+REPO_URL = "https://raw.githubusercontent.com/pego/twin-mind/main"
+RAW_HOST = "raw.githubusercontent.com"
+ALLOWED_REPO_PREFIX = "/pego/twin-mind/"
+
+CORE_MODULES = [
+    "__init__",
+    "constants",
+    "output",
+    "config",
+    "fs",
+    "git",
+    "memory",
+    "memvid_check",
+    "index_state",
+    "shared_memory",
+    "indexing",
+    "auto_init",
+    "cli",
+]
+
+COMMAND_MODULES = [
+    "__init__",
+    "init",
+    "index",
+    "remember",
+    "search",
+    "ask",
+    "recent",
+    "stats",
+    "status",
+    "reset",
+    "reindex",
+    "prune",
+    "context",
+    "export",
+    "doctor",
+    "upgrade",
+    "uninstall",
+    "install_skills",
+]
+
+
+def _validate_fetch_url(url: str) -> None:
+    """Allow only trusted HTTPS URLs from the official raw GitHub host."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError("Only HTTPS URLs are allowed for upgrade downloads")
+    if parsed.netloc != RAW_HOST:
+        raise ValueError(f"Unexpected host for upgrade download: {parsed.netloc}")
+    if not parsed.path.startswith(ALLOWED_REPO_PREFIX):
+        raise ValueError(f"Unexpected repository path for upgrade download: {parsed.path}")
+
 
 def _fetch_url(url: str) -> str:
-    """Fetch URL content with SSL fallback for macOS certificate issues."""
+    """Fetch URL content from the trusted Twin-Mind upstream."""
+    _validate_fetch_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": "twin-mind-upgrade"})
 
     try:
-        # Try with default SSL context first
         with urllib.request.urlopen(req, timeout=10) as response:
             return response.read().decode("utf-8")
     except urllib.error.URLError as e:
         if "CERTIFICATE_VERIFY_FAILED" in str(e):
-            # Fallback: create unverified SSL context (common macOS issue)
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            with urllib.request.urlopen(req, timeout=10, context=ctx) as response:
-                return response.read().decode("utf-8")
+            raise RuntimeError(
+                "TLS certificate verification failed. Fix your local trust store and retry."
+            ) from e
         raise
+
+
+def _parse_version(v: str) -> Tuple[int, ...]:
+    """Parse version string into comparable tuple."""
+    try:
+        parts = v.split(".")
+        return tuple(int(p) for p in parts)
+    except (ValueError, AttributeError):
+        return (0, 0, 0)
+
+
+def _download_release_bundle(repo_url: str) -> Dict[str, str]:
+    """Download all required files before mutating local installation."""
+    required_paths = [
+        "scripts/twin-mind.py",
+        "SKILL.md",
+        "install-skills.sh",
+    ]
+    required_paths.extend(f"scripts/twin_mind/{module}.py" for module in CORE_MODULES)
+    required_paths.extend(f"scripts/twin_mind/commands/{module}.py" for module in COMMAND_MODULES)
+
+    bundle: Dict[str, str] = {}
+    for rel_path in required_paths:
+        try:
+            bundle[rel_path] = _fetch_url(f"{repo_url}/{rel_path}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to download {rel_path}: {e}") from e
+    return bundle
 
 
 def cmd_upgrade(args: Any) -> None:
@@ -38,7 +115,6 @@ def cmd_upgrade(args: Any) -> None:
     if not config["output"]["color"] or not supports_color():
         Colors.disable()
 
-    REPO_URL = "https://raw.githubusercontent.com/pego/twin-mind/main"
     INSTALL_DIR = Path.home() / ".twin-mind"
     SKILL_DIR = Path.home() / ".agents" / "skills" / "twin-mind"
 
@@ -60,8 +136,8 @@ def cmd_upgrade(args: Any) -> None:
     if version_file.exists():
         try:
             current_version = version_file.read_text().strip()
-        except Exception:
-            pass
+        except OSError:
+            current_version = VERSION
 
     print(f"   Current version: {current_version}")
 
@@ -89,17 +165,8 @@ def cmd_upgrade(args: Any) -> None:
         print(error(f"Error checking for updates: {e}"))
         return
 
-    # Compare versions
-    def parse_version(v: str) -> Tuple[int, ...]:
-        """Parse version string into comparable tuple."""
-        try:
-            parts = v.split(".")
-            return tuple(int(p) for p in parts)
-        except (ValueError, AttributeError):
-            return (0, 0, 0)
-
-    current_tuple = parse_version(current_version)
-    latest_tuple = parse_version(latest_version)
+    current_tuple = _parse_version(current_version)
+    latest_tuple = _parse_version(latest_version)
 
     if current_tuple >= latest_tuple:
         print(f"\n{success('You are already running the latest version!')}")
@@ -122,111 +189,64 @@ def cmd_upgrade(args: Any) -> None:
     # Perform upgrade
     print(f"\n   {info('Upgrading...')}")
 
+    current_script = INSTALL_DIR / "twin-mind.py"
+    backup_script = INSTALL_DIR / "twin-mind.py.backup"
+    package_dir = INSTALL_DIR / "twin_mind"
+    commands_dir = package_dir / "commands"
+    package_backup = INSTALL_DIR / "twin_mind.backup"
+
     try:
+        # Download everything first to avoid partial upgrades due to network failures.
+        bundle = _download_release_bundle(REPO_URL)
+
         # Backup current script
-        current_script = INSTALL_DIR / "twin-mind.py"
-        backup_script = INSTALL_DIR / "twin-mind.py.backup"
         if current_script.exists():
             shutil.copy2(current_script, backup_script)
             print(f"   {success('+')} Backed up current version")
 
-        # Fetch and write new entry-point script
-        remote_script = _fetch_url(f"{REPO_URL}/scripts/twin-mind.py")
-        current_script.write_text(remote_script, encoding="utf-8")
-        current_script.chmod(0o755)
-        print(f"   {success('+')} Updated twin-mind.py")
-
-        # Update twin_mind package
-        print(f"   {info('Updating twin_mind package...')}")
-        package_dir = INSTALL_DIR / "twin_mind"
-        commands_dir = package_dir / "commands"
-
         # Backup existing package
-        package_backup = INSTALL_DIR / "twin_mind.backup"
         if package_dir.exists():
             if package_backup.exists():
                 shutil.rmtree(package_backup)
             shutil.copytree(package_dir, package_backup)
+            print(f"   {success('+')} Backed up twin_mind package")
+
+        # Write new entry-point script
+        current_script.write_text(bundle["scripts/twin-mind.py"], encoding="utf-8")
+        current_script.chmod(0o755)
+        print(f"   {success('+')} Updated twin-mind.py")
+
+        # Update twin_mind package atomically from pre-fetched content
+        print(f"   {info('Updating twin_mind package...')}")
 
         # Create directories
         package_dir.mkdir(parents=True, exist_ok=True)
         commands_dir.mkdir(parents=True, exist_ok=True)
 
-        # Download core modules
-        core_modules = [
-            "__init__",
-            "constants",
-            "output",
-            "config",
-            "fs",
-            "git",
-            "memory",
-            "memvid_check",
-            "index_state",
-            "shared_memory",
-            "indexing",
-            "auto_init",
-            "cli",
-        ]
-        for module in core_modules:
-            try:
-                content = _fetch_url(f"{REPO_URL}/scripts/twin_mind/{module}.py")
-                (package_dir / f"{module}.py").write_text(content, encoding="utf-8")
-            except Exception as e:
-                print(f"   {warning(f'Failed to update {module}.py: {e}')}")
+        for module in CORE_MODULES:
+            rel_path = f"scripts/twin_mind/{module}.py"
+            (package_dir / f"{module}.py").write_text(bundle[rel_path], encoding="utf-8")
 
-        # Download command modules
-        cmd_modules = [
-            "__init__",
-            "init",
-            "index",
-            "remember",
-            "search",
-            "ask",
-            "recent",
-            "stats",
-            "status",
-            "reset",
-            "reindex",
-            "prune",
-            "context",
-            "export",
-            "doctor",
-            "upgrade",
-            "uninstall",
-            "install_skills",
-        ]
-        for module in cmd_modules:
-            try:
-                content = _fetch_url(f"{REPO_URL}/scripts/twin_mind/commands/{module}.py")
-                (commands_dir / f"{module}.py").write_text(content, encoding="utf-8")
-            except Exception as e:
-                print(f"   {warning(f'Failed to update commands/{module}.py: {e}')}")
+        for module in COMMAND_MODULES:
+            rel_path = f"scripts/twin_mind/commands/{module}.py"
+            (commands_dir / f"{module}.py").write_text(bundle[rel_path], encoding="utf-8")
 
         print(f"   {success('+')} Updated twin_mind package")
 
         # Update version file
-        version_file.write_text(latest_version)
+        version_file.write_text(latest_version, encoding="utf-8")
         print(f"   {success('+')} Updated version.txt")
 
         # Update SKILL.md in canonical location (~/.agents/skills/twin-mind/)
-        try:
-            skill_content = _fetch_url(f"{REPO_URL}/SKILL.md")
-            SKILL_DIR.mkdir(parents=True, exist_ok=True)
-            (SKILL_DIR / "SKILL.md").write_text(skill_content, encoding="utf-8")
-            print(f"   {success('+')} Updated SKILL.md")
-        except Exception as e:
-            print(f"   {warning(f'Could not update SKILL.md: {e}')}")
+        SKILL_DIR.mkdir(parents=True, exist_ok=True)
+        (SKILL_DIR / "SKILL.md").write_text(bundle["SKILL.md"], encoding="utf-8")
+        print(f"   {success('+')} Updated SKILL.md")
 
         # Update install-skills.sh
-        try:
-            skills_sh = _fetch_url(f"{REPO_URL}/install-skills.sh")
-            skills_sh_path = INSTALL_DIR / "install-skills.sh"
-            skills_sh_path.write_text(skills_sh, encoding="utf-8")
-            skills_sh_path.chmod(0o755)
-            print(f"   {success('+')} Updated install-skills.sh")
-        except Exception as e:
-            print(f"   {warning(f'Could not update install-skills.sh: {e}')}")
+        skills_sh_path = INSTALL_DIR / "install-skills.sh"
+        skills_sh_path.write_text(bundle["install-skills.sh"], encoding="utf-8")
+        skills_sh_path.chmod(0o755)
+        print(f"   {success('+')} Updated install-skills.sh")
 
         print(f"\n{success('Upgrade complete!')}")
         print(f"   Now running version {latest_version}")
@@ -244,6 +264,14 @@ def cmd_upgrade(args: Any) -> None:
             try:
                 shutil.copy2(backup_script, current_script)
                 print("   Restored from backup.")
+            except Exception:
+                pass
+        if package_backup.exists():
+            try:
+                if package_dir.exists():
+                    shutil.rmtree(package_dir)
+                shutil.copytree(package_backup, package_dir)
+                print("   Restored twin_mind package from backup.")
             except Exception:
                 pass
 
