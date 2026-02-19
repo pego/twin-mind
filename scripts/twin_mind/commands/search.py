@@ -126,10 +126,15 @@ def cmd_search(args: Any) -> None:
                 "uri": hit.get("uri", ""),
                 "snippet": hit.get("text", "").strip(),
             }
-            # Try to extract line numbers from URI for code
+            # Add normalized file path for code hits.
             uri = hit.get("uri", "")
-            if source == "code" and uri and uri.startswith("twin-mind://code/"):
-                result_obj["file_path"] = uri.replace("twin-mind://code/", "")
+            if source == "code":
+                if uri.startswith("file://"):
+                    result_obj["file_path"] = uri[len("file://"):]
+                elif uri.startswith("twin-mind://code/"):
+                    result_obj["file_path"] = uri[len("twin-mind://code/"):]
+                elif hit.get("title"):
+                    result_obj["file_path"] = hit.get("title", "")
             output["results"].append(result_obj)
         print(json.dumps(output, indent=2))
         return

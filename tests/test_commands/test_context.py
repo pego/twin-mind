@@ -57,6 +57,7 @@ class TestCmdContext:
             patch("twin_mind.commands.context.get_memory_path", return_value=memory_path),
             patch("twin_mind.commands.context.get_memvid_sdk", return_value=mock_memvid),
             patch("twin_mind.commands.context.check_memvid"),
+            patch("twin_mind.commands.context.search_shared_memories", return_value=[]),
         ):
             from twin_mind.commands.context import cmd_context
 
@@ -81,6 +82,7 @@ class TestCmdContext:
             patch("twin_mind.commands.context.get_memory_path", return_value=tmp_path / "none.mv2"),
             patch("twin_mind.commands.context.get_memvid_sdk", return_value=mock_memvid),
             patch("twin_mind.commands.context.check_memvid"),
+            patch("twin_mind.commands.context.search_shared_memories", return_value=[]),
         ):
             from twin_mind.commands.context import cmd_context
 
@@ -106,6 +108,7 @@ class TestCmdContext:
             patch("twin_mind.commands.context.get_memory_path", return_value=tmp_path / "none.mv2"),
             patch("twin_mind.commands.context.get_memvid_sdk", return_value=mock_memvid),
             patch("twin_mind.commands.context.check_memvid"),
+            patch("twin_mind.commands.context.search_shared_memories", return_value=[]),
         ):
             from twin_mind.commands.context import cmd_context
 
@@ -141,6 +144,7 @@ class TestCmdContext:
             patch("twin_mind.commands.context.get_memory_path", return_value=tmp_path / "none.mv2"),
             patch("twin_mind.commands.context.get_memvid_sdk", return_value=mock_memvid),
             patch("twin_mind.commands.context.check_memvid"),
+            patch("twin_mind.commands.context.search_shared_memories", return_value=[]),
         ):
             from twin_mind.commands.context import cmd_context
 
@@ -167,6 +171,7 @@ class TestCmdContext:
             patch("twin_mind.commands.context.get_memory_path", return_value=tmp_path / "none.mv2"),
             patch("twin_mind.commands.context.get_memvid_sdk", return_value=mock_memvid),
             patch("twin_mind.commands.context.check_memvid"),
+            patch("twin_mind.commands.context.search_shared_memories", return_value=[]),
         ):
             from twin_mind.commands.context import cmd_context
 
@@ -177,3 +182,41 @@ class TestCmdContext:
         output = json.loads(captured.out)
         assert output["code_results"] > 0
         assert output["memory_results"] == 0
+
+    def test_context_includes_shared_memory(self, tmp_path: Any, capsys: Any) -> None:
+        """Shared decisions should contribute to generated context."""
+        mock_memvid = MagicMock()
+        mock_mem = MagicMock()
+        mock_mem.find.return_value = {"hits": []}
+        mock_memvid.use.return_value.__enter__ = MagicMock(return_value=mock_mem)
+        mock_memvid.use.return_value.__exit__ = MagicMock(return_value=False)
+
+        shared_results = [
+            (
+                0.87,
+                {
+                    "msg": "Use JWT over sessions for stateless auth",
+                    "tag": "arch",
+                    "author": "alice",
+                    "ts": "2026-01-01T10:00:00",
+                },
+            )
+        ]
+
+        with (
+            patch("twin_mind.commands.context.get_code_path", return_value=tmp_path / "none.mv2"),
+            patch("twin_mind.commands.context.get_memory_path", return_value=tmp_path / "none.mv2"),
+            patch("twin_mind.commands.context.get_memvid_sdk", return_value=mock_memvid),
+            patch("twin_mind.commands.context.check_memvid"),
+            patch("twin_mind.commands.context.search_shared_memories", return_value=shared_results),
+        ):
+            from twin_mind.commands.context import cmd_context
+
+            args = MockArgs(query="auth", max_tokens=4000, json=True)
+            cmd_context(args)
+
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["shared_memory_results"] == 1
+        assert output["memory_results"] == 1
+        assert "JWT over sessions" in output["context"]

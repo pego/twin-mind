@@ -5,12 +5,25 @@ from typing import Any
 
 from twin_mind.config import get_config
 from twin_mind.fs import FileLock, get_brain_dir, get_code_path, get_decisions_path
-from twin_mind.shared_memory import build_decisions_index
 from twin_mind.git import get_changed_files, get_commits_behind, get_current_commit, is_git_repo
 from twin_mind.index_state import load_index_state, save_index_state
-from twin_mind.indexing import collect_files, index_files_full, index_files_incremental
+from twin_mind.indexing import (
+    collect_files,
+    index_files_full,
+    index_files_incremental,
+    remove_indexed_paths,
+)
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
-from twin_mind.output import Colors, error, format_size, info, success, supports_color, warn_if_large
+from twin_mind.output import (
+    Colors,
+    error,
+    format_size,
+    info,
+    success,
+    supports_color,
+    warn_if_large,
+)
+from twin_mind.shared_memory import build_decisions_index
 
 
 def cmd_index(args: Any) -> None:
@@ -19,6 +32,7 @@ def cmd_index(args: Any) -> None:
     memvid_sdk = get_memvid_sdk()
 
     config = get_config()
+    verbose = config.get("output", {}).get("verbose", False) or getattr(args, "verbose", False)
     code_path = get_code_path()
 
     # Initialize colors based on config
@@ -87,16 +101,30 @@ def cmd_index(args: Any) -> None:
 
         with memvid_sdk.use("basic", str(code_path), mode=mode) as mem:
             if incremental:
+                stale_targets = list(dict.fromkeys(changed_files + deleted_files))
+                removed = remove_indexed_paths(mem, stale_targets, verbose=verbose)
+                if removed > 0:
+                    print(info(f"Removed {removed} stale entries"))
                 indexed = index_files_incremental(mem, changed_files, config, args)
             else:
+                removed = 0
                 indexed = index_files_full(mem, config, args)
+
+            try:
+                stats = mem.stats()
+                total_indexed = int(stats.get("frame_count", indexed))
+            except Exception:
+                total_indexed = indexed
 
     # Save state
     current_commit = get_current_commit()
     if current_commit:
-        save_index_state(current_commit, indexed)
+        save_index_state(current_commit, total_indexed)
 
     print(f"\n{success('Done!')} Indexed {indexed} files")
+    if incremental and removed:
+        print(f"   Removed stale entries: {removed}")
+    print(f"   Total indexed files: {total_indexed}")
     print(f"   Size: {format_size(code_path.stat().st_size)}")
 
     if config.get("maintenance", {}).get("size_warnings", True):

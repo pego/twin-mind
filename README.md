@@ -94,7 +94,7 @@ your-project/.claude/
 | `remember <msg>` | Store locally (default) |
 | `remember <msg> --share` | Store to shared decisions |
 | `remember <msg> --local` | Force store locally |
-| `context <query>` | Combined code+memory for prompts |
+| `context <query>` | Combined code + local/shared memory for prompts |
 | `status` | Health check |
 | `stats` | Display statistics |
 | `recent` | Show recent memories (local + shared) |
@@ -103,7 +103,7 @@ your-project/.claude/
 
 | Command | Description |
 |---------|-------------|
-| `index` | Incremental index (git-based, fast) |
+| `index` | Incremental index with stale-entry cleanup (git-based, fast) |
 | `index --fresh` | Full rebuild from scratch |
 | `index --status` | Preview what would be indexed |
 | `reindex` | Reset code + fresh index |
@@ -179,6 +179,8 @@ twin-mind search "authentication"
 twin-mind search "Redis" --in memory
 # Returns results from: local memory AND shared decisions
 ```
+
+`twin-mind context "<topic>"` also includes both local and shared memories.
 
 Results show the source:
 ```

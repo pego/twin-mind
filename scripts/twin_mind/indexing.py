@@ -81,6 +81,42 @@ def _read_file_content(filepath: Path, codebase_root: Path) -> Optional[Dict[str
         return None
 
 
+def remove_indexed_paths(mem: Any, relative_paths: List[str], verbose: bool = False) -> int:
+    """Remove existing indexed frames matching relative file paths.
+
+    This is used during incremental indexing to prevent duplicate stale entries
+    when files are changed or deleted.
+    """
+    targets = {path for path in relative_paths if path}
+    if not targets:
+        return 0
+
+    removed = 0
+    try:
+        entries = mem.timeline()
+    except Exception:
+        return 0
+
+    for entry in entries:
+        uri = entry.get("uri", "")
+        frame_path = uri[7:] if uri.startswith("file://") else ""
+        if frame_path not in targets:
+            continue
+
+        frame_id = entry.get("frame_id")
+        if frame_id is None:
+            continue
+
+        try:
+            mem.remove(frame_id)
+            removed += 1
+        except Exception as e:
+            if verbose:
+                print(warning(f"   Failed to remove stale frame for {frame_path}: {e}"))
+
+    return removed
+
+
 def index_files_full(mem: Any, config: Dict[str, Any], args: Any) -> int:
     """Full reindex of all files."""
     codebase_root = Path.cwd()

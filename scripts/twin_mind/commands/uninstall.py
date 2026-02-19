@@ -10,7 +10,8 @@ from twin_mind.output import confirm, error, success, warning
 def cmd_uninstall(args: Any) -> None:
     """Uninstall twin-mind from the system."""
     install_dir = Path.home() / ".twin-mind"
-    skill_dir = Path.home() / ".claude" / "skills" / "twin-mind"
+    canonical_skill_dir = Path.home() / ".agents" / "skills" / "twin-mind"
+    legacy_skill_dir = Path.home() / ".claude" / "skills" / "twin-mind"
 
     print("\nTwin-Mind Uninstaller")
     print("=" * 40)
@@ -18,8 +19,10 @@ def cmd_uninstall(args: Any) -> None:
     items_to_remove = []
     if install_dir.exists():
         items_to_remove.append(("Installation directory", install_dir))
-    if skill_dir.exists():
-        items_to_remove.append(("Skill directory", skill_dir))
+    if canonical_skill_dir.exists():
+        items_to_remove.append(("Canonical skill directory", canonical_skill_dir))
+    if legacy_skill_dir.exists():
+        items_to_remove.append(("Legacy skill directory", legacy_skill_dir))
 
     if not items_to_remove:
         print("Nothing to uninstall - twin-mind is not installed globally.")

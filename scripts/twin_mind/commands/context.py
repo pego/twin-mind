@@ -5,6 +5,7 @@ from typing import Any
 
 from twin_mind.fs import get_code_path, get_memory_path
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
+from twin_mind.shared_memory import search_shared_memories
 
 
 def cmd_context(args: Any) -> None:
@@ -20,7 +21,8 @@ def cmd_context(args: Any) -> None:
 
     # Collect results
     code_results = []
-    memory_results = []
+    local_memory_results = []
+    shared_memory_results = []
 
     # Search code
     if code_path.exists():
@@ -32,7 +34,20 @@ def cmd_context(args: Any) -> None:
     if memory_path.exists():
         with memvid_sdk.use("basic", str(memory_path), mode="open") as mem:
             response = mem.find(query, k=5, snippet_chars=1000)
-            memory_results = response.get("hits", [])[:3]  # Top 3 memory results
+            local_memory_results = response.get("hits", [])[:3]  # Top 3 local memory results
+
+    # Search shared decisions
+    for score, entry in search_shared_memories(query, top_k=5)[:3]:
+        shared_memory_results.append(
+            {
+                "title": f"[{entry.get('tag', 'general')}] by {entry.get('author', 'unknown')}",
+                "text": entry.get("msg", ""),
+                "score": score,
+                "source": "shared",
+            }
+        )
+
+    memory_results = local_memory_results + shared_memory_results
 
     # Build context document
     context_parts = []
@@ -76,6 +91,8 @@ def cmd_context(args: Any) -> None:
             "context": context,
             "code_results": len(code_results),
             "memory_results": len(memory_results),
+            "local_memory_results": len(local_memory_results),
+            "shared_memory_results": len(shared_memory_results),
             "total_chars": len(context),
         }
         print(json.dumps(output, indent=2))

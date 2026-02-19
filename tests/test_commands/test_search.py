@@ -101,6 +101,59 @@ class TestCmdSearch:
         assert len(output["results"]) == 1
         assert output["results"][0]["source"] == "code"
 
+    def test_search_json_extracts_file_path_from_file_uri(
+        self, tmp_path: Any, capsys: Any
+    ) -> None:
+        """JSON output should include file_path for file:// URIs."""
+        mock_memvid = MagicMock()
+        mock_mem = MagicMock()
+        mock_mem.find.return_value = {
+            "hits": [
+                {
+                    "title": "src/auth/login.py",
+                    "text": "def login(): pass",
+                    "score": 0.91,
+                    "uri": "file://src/auth/login.py",
+                }
+            ]
+        }
+        mock_memvid.use.return_value.__enter__ = MagicMock(return_value=mock_mem)
+        mock_memvid.use.return_value.__exit__ = MagicMock(return_value=False)
+
+        brain_dir = tmp_path / ".claude"
+        brain_dir.mkdir()
+        code_path = brain_dir / "code.mv2"
+        code_path.touch()
+
+        with (
+            patch("twin_mind.commands.search.get_code_path", return_value=code_path),
+            patch("twin_mind.commands.search.get_memory_path", return_value=tmp_path / "none.mv2"),
+            patch("twin_mind.commands.search.get_memvid_sdk", return_value=mock_memvid),
+            patch("twin_mind.commands.search.check_memvid"),
+            patch("twin_mind.commands.search.get_config", return_value={
+                "output": {"color": False},
+                "index": {"adaptive_retrieval": False},
+            }),
+            patch("twin_mind.commands.search.check_stale_index"),
+            patch("twin_mind.commands.search.search_shared_memories", return_value=[]),
+        ):
+            from twin_mind.commands.search import cmd_search
+
+            args = MockArgs(
+                query="login",
+                scope="code",
+                top_k=5,
+                json=True,
+                context=None,
+                full=False,
+                no_adaptive=False,
+            )
+            cmd_search(args)
+
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["results"][0]["file_path"] == "src/auth/login.py"
+
     def test_search_no_results(self, tmp_path: Any, capsys: Any) -> None:
         """Test search with no results."""
         mock_memvid = MagicMock()

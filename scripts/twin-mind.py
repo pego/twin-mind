@@ -28,14 +28,16 @@ from pathlib import Path
 # file for VERSION = "..." to detect the latest release. Keep it in sync with
 # twin_mind/constants.py (the canonical source). The import below overrides it
 # at runtime so only constants.py needs to change for future bumps.
-VERSION = "1.8.0"
+VERSION = "1.8.1"
 
 # Ensure the package directory is in the path so twin_mind can be imported
 _package_dir = Path(__file__).parent
 if str(_package_dir) not in sys.path:
     sys.path.insert(0, str(_package_dir))
 
-from twin_mind.constants import VERSION  # noqa: F811,E402 — runtime source of truth
+from twin_mind.constants import VERSION as CANONICAL_VERSION  # noqa: E402
+
+VERSION = CANONICAL_VERSION
 
 if __name__ == "__main__":
     from twin_mind.cli import main

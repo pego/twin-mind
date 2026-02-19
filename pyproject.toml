@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "twin-mind"
-version = "1.6.0"
+version = "1.8.1"
 description = "Dual memory for AI coding agents - semantic code search and persistent memory"
 readme = "README.md"
 license = {text = "MIT"}
@@ -28,7 +28,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "memvid>=0.1.0",
+    "memvid-sdk>=2.0.0",
 ]
 
 [project.optional-dependencies]

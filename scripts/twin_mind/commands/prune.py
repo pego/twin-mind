@@ -86,11 +86,18 @@ def cmd_prune(args: Any) -> None:
         # Check tag filter
         if args.tag:
             tag_lower = args.tag.lower()
-            # Extract title from preview
-            title = ""
-            if "\ntitle: " in preview:
-                title = preview.split("\ntitle: ")[1].split("\n")[0]
-            if tag_lower in title.lower() or f"[{tag_lower}]" in preview.lower():
+            parsed = parse_timeline_entry(entry)
+            parsed_tags = [tag.lower() for tag in parsed.get("tags", [])]
+            tag_match = any(
+                tag == tag_lower or tag.endswith(f":{tag_lower}") for tag in parsed_tags
+            )
+
+            # Backward-compatible fallback for older entries without structured tags.
+            if not tag_match:
+                title = parsed.get("title", "").lower()
+                tag_match = tag_lower in title or f"[{tag_lower}]" in preview.lower()
+
+            if tag_match:
                 should_remove = True
 
         if should_remove:

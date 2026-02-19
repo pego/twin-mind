@@ -9,6 +9,7 @@ from twin_mind.indexing import (
     collect_files,
     detect_language,
     get_memvid_create_kwargs,
+    remove_indexed_paths,
 )
 
 
@@ -227,3 +228,36 @@ class TestGetMemvidCreateKwargs:
         kwargs = get_memvid_create_kwargs(sample_config)
 
         assert kwargs == {}
+
+
+class TestRemoveIndexedPaths:
+    """Tests for remove_indexed_paths helper."""
+
+    def test_removes_matching_file_uris(self) -> None:
+        """Matching URIs should be removed by frame id."""
+        mem = type("MemStub", (), {})()
+        mem.timeline = lambda: [
+            {"frame_id": 1, "uri": "file://src/a.py"},
+            {"frame_id": 2, "uri": "file://src/b.py"},
+            {"frame_id": 3, "uri": "file://src/c.py"},
+        ]
+        removed_ids = []
+        mem.remove = lambda frame_id: removed_ids.append(frame_id)
+
+        removed = remove_indexed_paths(mem, ["src/a.py", "src/c.py"])
+
+        assert removed == 2
+        assert removed_ids == [1, 3]
+
+    def test_noop_when_timeline_unavailable(self) -> None:
+        """Errors reading timeline should result in no-op."""
+        mem = type("MemStub", (), {})()
+
+        def _boom() -> list:
+            raise RuntimeError("timeline unavailable")
+
+        mem.timeline = _boom
+        mem.remove = lambda frame_id: frame_id
+
+        removed = remove_indexed_paths(mem, ["src/a.py"])
+        assert removed == 0

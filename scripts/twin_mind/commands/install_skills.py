@@ -7,8 +7,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from twin_mind.output import error, info
 from twin_mind.commands.upgrade import _fetch_url
+from twin_mind.output import error, info
 
 REPO_URL = "https://raw.githubusercontent.com/pego/twin-mind/main"
 INSTALL_DIR = Path.home() / ".twin-mind"
@@ -41,7 +41,7 @@ def cmd_install_skills(args: Any) -> None:
         tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False)
         tmp.write(content)
         tmp.close()
-        os.chmod(tmp.name, 0o755)
+        os.chmod(tmp.name, 0o700)
         script_path = tmp.name
 
     try:

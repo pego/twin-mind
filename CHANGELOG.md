@@ -2,6 +2,31 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.8.1] - 2026-02-19
+
+### Fixed
+- **Incremental index correctness**:
+  - Removes stale entries for changed/deleted files before re-indexing
+  - Saves total indexed frame count to `index-state.json` (status now reports accurate file counts)
+  - Improves incremental output with stale-removal and total-count details
+
+- **Search and context behavior**:
+  - `search --json` now emits `file_path` for `file://...` code URIs
+  - `context` now includes shared decisions (`decisions.jsonl`) in generated context output
+  - `context --json` now reports `local_memory_results` and `shared_memory_results`
+
+- **Prune tag matching**:
+  - `prune memory --tag` now matches structured tags (e.g. `category:arch`) instead of title-only heuristics
+  - Retains backward-compatible fallback matching for older entries
+
+- **Install/uninstall consistency**:
+  - `uninstall` now handles canonical skills directory `~/.agents/skills/twin-mind` and legacy `~/.claude/skills/twin-mind`
+  - `install-skills` temp script permission reduced to `0700` to satisfy security checks
+
+- **Packaging and release metadata consistency**:
+  - `pyproject.toml` version and runtime version literals are synchronized to `1.8.1`
+  - Runtime dependency updated to `memvid-sdk>=2.0.0` to match actual imports/install flow
+
 ## [1.8.0] - 2026-02-18
 
 ### Added
@@ -13,7 +38,7 @@ All notable changes to Twin-Mind will be documented in this file.
 - **`install-skills.sh`**: Standalone multi-IDE skill installer
   - Detects 14 agents: Claude Code, Cursor, Windsurf, Cline, Continue, Roo Code,
     Kilo Code, Kiro, Augment, GitHub Copilot, Gemini CLI, Codex, Goose, OpenCode
-  - Symlinks `~/.twin-mind/SKILL.md` into each detected agent's global skills directory
+  - Symlinks `~/.agents/skills/twin-mind` into each detected agent's global skills directory
   - Detection by config directory presence or binary in PATH
   - Can be run standalone: `curl -sSL .../install-skills.sh | bash`
 
