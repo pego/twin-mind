@@ -1,18 +1,29 @@
 """Shared memory operations for twin-mind."""
 
 import json
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-from twin_mind.fs import get_decisions_mv2_path, get_decisions_path
+from twin_mind.fs import FileLock, get_decisions_mv2_path, get_decisions_path
 from twin_mind.git import get_git_author
 from twin_mind.memvid_check import get_memvid_sdk
 from twin_mind.output import error
 
 
+def _append_jsonl_atomic(path: Any, line: str) -> None:
+    """Append one JSONL line under a process lock and flush to disk."""
+    with FileLock(path):
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+            os.fsync(f.fileno())
+
+
 def write_shared_memory(message: str, tag: Optional[str] = None) -> bool:
     """Write a memory to the shared decisions.jsonl file."""
     decisions_path = get_decisions_path()
+    decisions_path.parent.mkdir(parents=True, exist_ok=True)
 
     entry = {
         "ts": datetime.now().isoformat(),
@@ -22,9 +33,7 @@ def write_shared_memory(message: str, tag: Optional[str] = None) -> bool:
     }
 
     try:
-        # Append to file (create if doesn't exist)
-        with open(decisions_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        _append_jsonl_atomic(decisions_path, json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception as e:
         print(error(f"Failed to write shared memory: {e}"))
         return False
@@ -33,17 +42,18 @@ def write_shared_memory(message: str, tag: Optional[str] = None) -> bool:
     mv2_path = get_decisions_mv2_path()
     if mv2_path.exists():
         try:
-            memvid_sdk = get_memvid_sdk()
-            with memvid_sdk.use("basic", str(mv2_path), mode="open") as mem:
-                mem.put(
-                    title=f"[{entry.get('tag', 'general')}] {entry.get('msg', '')[:50]}",
-                    text=entry.get("msg", ""),
-                    uri=f"twin-mind://shared/{entry.get('ts', '')}",
-                    tags=[
-                        f"category:{entry.get('tag', 'general')}",
-                        f"author:{entry.get('author', '')}",
-                    ],
-                )
+            with FileLock(mv2_path):
+                memvid_sdk = get_memvid_sdk()
+                with memvid_sdk.use("basic", str(mv2_path), mode="open") as mem:
+                    mem.put(
+                        title=f"[{entry.get('tag', 'general')}] {entry.get('msg', '')[:50]}",
+                        text=entry.get("msg", ""),
+                        uri=f"twin-mind://shared/{entry.get('ts', '')}",
+                        tags=[
+                            f"category:{entry.get('tag', 'general')}",
+                            f"author:{entry.get('author', '')}",
+                        ],
+                    )
         except Exception:
             pass  # MV2 update is best-effort; JSONL is the source of truth
 
@@ -87,17 +97,18 @@ def build_decisions_index() -> bool:
     try:
         memvid_sdk = get_memvid_sdk()
         mv2_path = get_decisions_mv2_path()
-        with memvid_sdk.use("basic", str(mv2_path), mode="create") as mem:
-            for entry in memories:
-                mem.put(
-                    title=f"[{entry.get('tag', 'general')}] {entry.get('msg', '')[:50]}",
-                    text=entry.get("msg", ""),
-                    uri=f"twin-mind://shared/{entry.get('ts', '')}",
-                    tags=[
-                        f"category:{entry.get('tag', 'general')}",
-                        f"author:{entry.get('author', '')}",
-                    ],
-                )
+        with FileLock(mv2_path):
+            with memvid_sdk.use("basic", str(mv2_path), mode="create") as mem:
+                for entry in memories:
+                    mem.put(
+                        title=f"[{entry.get('tag', 'general')}] {entry.get('msg', '')[:50]}",
+                        text=entry.get("msg", ""),
+                        uri=f"twin-mind://shared/{entry.get('ts', '')}",
+                        tags=[
+                            f"category:{entry.get('tag', 'general')}",
+                            f"author:{entry.get('author', '')}",
+                        ],
+                    )
         return True
     except Exception:
         return False

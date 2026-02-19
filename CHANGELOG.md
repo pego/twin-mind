@@ -2,6 +2,21 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.8.3] - 2026-02-19
+
+### Fixed
+- **Concurrency safety for memory writes**:
+  - Shared decisions appends are now lock-protected and fsync-flushed before returning
+  - Shared semantic index updates/rebuilds are lock-guarded to avoid concurrent MV2 write races
+  - Local `remember` writes now use a lock around `memory.mv2` updates
+  - Local write lock contention now exits cleanly with an explicit "store is busy" error
+
+### Added
+- **Command/test coverage expansion**:
+  - New test modules: `test_auto_init.py`, `test_doctor.py`, `test_export.py`, `test_recent.py`, `test_reset.py`
+  - Extended concurrency-path tests for shared/local memory write locking
+  - Improves regression detection for high-risk operational commands
+
 ## [1.8.2] - 2026-02-19
 
 ### Fixed

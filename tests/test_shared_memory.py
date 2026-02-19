@@ -1,5 +1,6 @@
 """Tests for twin_mind.shared_memory module (semantic decisions index)."""
 
+from contextlib import nullcontext
 import json
 from pathlib import Path
 from typing import Any
@@ -188,3 +189,33 @@ class TestSearchSharedMemories:
 
         assert result is True
         mock_sdk.use.assert_not_called()
+
+    def test_write_shared_memory_uses_file_locks(self, tmp_path: Any) -> None:
+        """Shared writes lock both JSONL and MV2 when MV2 exists."""
+        brain_dir = tmp_path / ".claude"
+        brain_dir.mkdir()
+        jsonl_path = brain_dir / "decisions.jsonl"
+        mv2_path = brain_dir / "decisions.mv2"
+        mv2_path.touch()
+
+        mock_sdk = MagicMock()
+        mock_mem = MagicMock()
+        mock_sdk.use.return_value.__enter__ = MagicMock(return_value=mock_mem)
+        mock_sdk.use.return_value.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch("twin_mind.shared_memory.get_decisions_path", return_value=jsonl_path),
+            patch("twin_mind.shared_memory.get_decisions_mv2_path", return_value=mv2_path),
+            patch("twin_mind.shared_memory.get_memvid_sdk", return_value=mock_sdk),
+            patch("twin_mind.shared_memory.get_git_author", return_value="tester"),
+            patch(
+                "twin_mind.shared_memory.FileLock",
+                side_effect=lambda *args, **kwargs: nullcontext(),
+            ) as mock_lock,
+        ):
+            from twin_mind.shared_memory import write_shared_memory
+
+            result = write_shared_memory("Locked write", tag="arch")
+
+        assert result is True
+        assert mock_lock.call_count == 2  # decisions.jsonl + decisions.mv2

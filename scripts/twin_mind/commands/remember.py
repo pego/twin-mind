@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from twin_mind.config import get_config
-from twin_mind.fs import get_decisions_path, get_memory_path
+from twin_mind.fs import FileLock, get_decisions_path, get_memory_path
 from twin_mind.git import get_git_author
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
 from twin_mind.output import warn_if_large
@@ -67,24 +67,29 @@ def cmd_remember(args: Any) -> None:
         # Check deduplication setting
         use_dedupe = config["memory"].get("dedupe", True)
 
-        with memvid_sdk.use("basic", str(memory_path), mode="open") as mem:
-            try:
-                # Try with dedupe parameter if supported
-                mem.put(
-                    title=title,
-                    text=args.message,
-                    uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                    tags=tags,
-                    dedupe=use_dedupe,
-                )
-            except TypeError:
-                # Fallback if memvid doesn't support dedupe parameter
-                mem.put(
-                    title=title,
-                    text=args.message,
-                    uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                    tags=tags,
-                )
+        try:
+            with FileLock(memory_path):
+                with memvid_sdk.use("basic", str(memory_path), mode="open") as mem:
+                    try:
+                        # Try with dedupe parameter if supported
+                        mem.put(
+                            title=title,
+                            text=args.message,
+                            uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                            tags=tags,
+                            dedupe=use_dedupe,
+                        )
+                    except TypeError:
+                        # Fallback if memvid doesn't support dedupe parameter
+                        mem.put(
+                            title=title,
+                            text=args.message,
+                            uri=f"twin-mind://memory/{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                            tags=tags,
+                        )
+        except OSError as e:
+            print(f"Failed to write memory (store is busy): {e}")
+            sys.exit(1)
 
         dedupe_note = " (dedupe)" if use_dedupe else ""
         print(f"Remembered{tag_str}: {title}")

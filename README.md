@@ -168,6 +168,8 @@ With this config:
 - `twin-mind remember "X"` → saves to `decisions.jsonl`
 - `twin-mind remember "X" --local` → saves to `memory.mv2`
 
+Memory writes are lock-protected to avoid concurrent write races (both local and shared paths).
+
 ### Searching Across Both
 
 Search automatically queries both local and shared memories:

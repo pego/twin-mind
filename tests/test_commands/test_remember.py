@@ -1,8 +1,10 @@
 """Tests for twin_mind.commands.remember module."""
 
+from contextlib import nullcontext
 import json
 from argparse import Namespace
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -235,3 +237,61 @@ class TestCmdRemember:
         mock_write_shared.assert_not_called()
         # Should call memvid put
         mock_mem.put.assert_called_once()
+
+    @patch("twin_mind.commands.remember.check_memvid")
+    @patch("twin_mind.commands.remember.get_memvid_sdk")
+    @patch("twin_mind.commands.remember.FileLock")
+    def test_remember_local_uses_file_lock(
+        self,
+        mock_file_lock: MagicMock,
+        mock_get_sdk: MagicMock,
+        mock_check: MagicMock,
+        mock_memvid_sdk: MagicMock,
+        temp_dir: Path,
+        mock_brain_dir: Path,
+    ) -> None:
+        """Local memory writes are guarded by a file lock."""
+        from twin_mind.commands.remember import cmd_remember
+
+        mock_mem = MagicMock()
+        mock_memvid_sdk.use.return_value.__enter__.return_value = mock_mem
+        mock_get_sdk.return_value = mock_memvid_sdk
+        mock_file_lock.side_effect = lambda *args, **kwargs: nullcontext()
+
+        memory_path = mock_brain_dir / "memory.mv2"
+        memory_path.write_text("")
+
+        args = Namespace(message="Locked local write", tag="test", local=False, share=False)
+        cmd_remember(args)
+
+        mock_file_lock.assert_called_once_with(memory_path)
+        mock_mem.put.assert_called_once()
+
+    @patch("twin_mind.commands.remember.check_memvid")
+    @patch("twin_mind.commands.remember.get_memvid_sdk")
+    @patch("twin_mind.commands.remember.FileLock")
+    def test_remember_exits_when_lock_is_busy(
+        self,
+        mock_file_lock: MagicMock,
+        mock_get_sdk: MagicMock,
+        mock_check: MagicMock,
+        mock_memvid_sdk: MagicMock,
+        temp_dir: Path,
+        mock_brain_dir: Path,
+        capsys: Any,
+    ) -> None:
+        """When the memory store lock cannot be acquired, command exits with an error."""
+        from twin_mind.commands.remember import cmd_remember
+
+        mock_get_sdk.return_value = mock_memvid_sdk
+        mock_file_lock.side_effect = OSError("busy")
+
+        memory_path = mock_brain_dir / "memory.mv2"
+        memory_path.write_text("")
+
+        args = Namespace(message="Should fail", tag=None, local=False, share=False)
+        with pytest.raises(SystemExit):
+            cmd_remember(args)
+
+        captured = capsys.readouterr()
+        assert "store is busy" in captured.out
