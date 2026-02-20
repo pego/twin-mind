@@ -155,35 +155,36 @@ Repository: https://github.com/pego/twin-mind
     )
     p_context.add_argument("--json", "-j", action="store_true", help="Output as JSON")
 
-    # entities
-    p_entities = subparsers.add_parser("entities", help="Query extracted code entities")
-    p_entities_sub = p_entities.add_subparsers(dest="action")
-    p_entities_sub.required = True
+    # entities (hidden on partial upgrades where module is missing)
+    if cmd_entities is not None:
+        p_entities = subparsers.add_parser("entities", help="Query extracted code entities")
+        p_entities_sub = p_entities.add_subparsers(dest="action")
+        p_entities_sub.required = True
 
-    p_entities_find = p_entities_sub.add_parser("find", help="Find entities by symbol")
-    p_entities_find.add_argument("symbol", help="Entity symbol or qualified name")
-    p_entities_find.add_argument(
-        "--kind",
-        choices=["module", "class", "function", "method"],
-        help="Filter by entity kind",
-    )
-    p_entities_find.add_argument("--limit", "-k", type=int, default=10, help="Max results")
-    p_entities_find.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+        p_entities_find = p_entities_sub.add_parser("find", help="Find entities by symbol")
+        p_entities_find.add_argument("symbol", help="Entity symbol or qualified name")
+        p_entities_find.add_argument(
+            "--kind",
+            choices=["module", "class", "function", "method"],
+            help="Filter by entity kind",
+        )
+        p_entities_find.add_argument("--limit", "-k", type=int, default=10, help="Max results")
+        p_entities_find.add_argument("--json", "-j", action="store_true", help="Output as JSON")
 
-    p_entities_callers = p_entities_sub.add_parser("callers", help="Find callers of a symbol")
-    p_entities_callers.add_argument("symbol", help="Symbol to inspect")
-    p_entities_callers.add_argument("--limit", "-k", type=int, default=20, help="Max results")
-    p_entities_callers.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+        p_entities_callers = p_entities_sub.add_parser("callers", help="Find callers of a symbol")
+        p_entities_callers.add_argument("symbol", help="Symbol to inspect")
+        p_entities_callers.add_argument("--limit", "-k", type=int, default=20, help="Max results")
+        p_entities_callers.add_argument("--json", "-j", action="store_true", help="Output as JSON")
 
-    p_entities_callees = p_entities_sub.add_parser("callees", help="Find callees for a symbol")
-    p_entities_callees.add_argument("symbol", help="Caller symbol to inspect")
-    p_entities_callees.add_argument("--limit", "-k", type=int, default=20, help="Max results")
-    p_entities_callees.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+        p_entities_callees = p_entities_sub.add_parser("callees", help="Find callees for a symbol")
+        p_entities_callees.add_argument("symbol", help="Caller symbol to inspect")
+        p_entities_callees.add_argument("--limit", "-k", type=int, default=20, help="Max results")
+        p_entities_callees.add_argument("--json", "-j", action="store_true", help="Output as JSON")
 
-    p_entities_inherits = p_entities_sub.add_parser("inherits", help="Find subclasses")
-    p_entities_inherits.add_argument("symbol", help="Base class symbol")
-    p_entities_inherits.add_argument("--limit", "-k", type=int, default=20, help="Max results")
-    p_entities_inherits.add_argument("--json", "-j", action="store_true", help="Output as JSON")
+        p_entities_inherits = p_entities_sub.add_parser("inherits", help="Find subclasses")
+        p_entities_inherits.add_argument("symbol", help="Base class symbol")
+        p_entities_inherits.add_argument("--limit", "-k", type=int, default=20, help="Max results")
+        p_entities_inherits.add_argument("--json", "-j", action="store_true", help="Output as JSON")
 
     # export
     p_export = subparsers.add_parser("export", help="Export memories")
@@ -249,7 +250,7 @@ Repository: https://github.com/pego/twin-mind
         "reset": cmd_reset,
         "prune": cmd_prune,
         "context": cmd_context,
-        "entities": cmd_entities,
+        **({"entities": cmd_entities} if cmd_entities is not None else {}),
         "export": cmd_export,
         "uninstall": cmd_uninstall,
         "doctor": cmd_doctor,

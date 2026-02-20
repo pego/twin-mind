@@ -105,6 +105,9 @@ your-project/.claude/
 | `stats` | Display statistics |
 | `recent` | Show recent memories (local + shared) |
 
+When searching mixed sources (`--in all`), Twin-Mind normalizes ranking across sources.
+In `--json` output, `score` is normalized and `raw_score` is source-native.
+
 ### Index Commands
 
 | Command | Description |

@@ -2,6 +2,20 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.9.1] - 2026-02-20
+
+### Fixed
+- **Upgrade compatibility for new modules**:
+  - `upgrade` now includes `entity_graph.py` and `commands/entities.py` in release bundles
+  - `cli`, `auto_init`, `index`, and command imports now degrade gracefully on partial installs
+  - Prevents startup failures such as `ModuleNotFoundError: twin_mind.entity_graph`
+
+### Changed
+- **Cross-source search ranking normalization**:
+  - `search --in all` now uses weighted reciprocal-rank fusion (RRF) to normalize ranking across code, memory, shared, and entity sources
+  - Avoids direct raw-score comparisons across incompatible scales
+  - `search --json` now includes both normalized `score` and source-native `raw_score`
+
 ## [1.9.0] - 2026-02-20
 
 ### Added

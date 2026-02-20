@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from twin_mind.config import get_config
-from twin_mind.entity_graph import rebuild_entity_graph, update_entity_graph_incremental
 from twin_mind.fs import FileLock, get_brain_dir, get_code_path, get_decisions_path
 from twin_mind.git import get_changed_files, get_commits_behind, get_current_commit, is_git_repo
 from twin_mind.index_state import load_index_state, save_index_state
@@ -27,6 +26,12 @@ from twin_mind.output import (
     warning,
 )
 from twin_mind.shared_memory import build_decisions_index
+
+try:
+    from twin_mind.entity_graph import rebuild_entity_graph, update_entity_graph_incremental
+except ImportError:
+    rebuild_entity_graph = None  # type: ignore[assignment]
+    update_entity_graph_incremental = None  # type: ignore[assignment]
 
 
 def cmd_index(args: Any) -> None:
@@ -135,7 +140,7 @@ def cmd_index(args: Any) -> None:
 
     # Build/update entities graph from Python files
     entities_cfg = config.get("entities", {})
-    if entities_cfg.get("enabled", False):
+    if entities_cfg.get("enabled", False) and rebuild_entity_graph and update_entity_graph_incremental:
         try:
             if incremental:
                 entity_files, entity_count, relation_count = update_entity_graph_incremental(
@@ -154,6 +159,8 @@ def cmd_index(args: Any) -> None:
             )
         except Exception as e:
             print(warning(f"Entity extraction skipped: {e}"))
+    elif entities_cfg.get("enabled", False):
+        print(warning("Entity extraction unavailable in this installation (partial upgrade)."))
 
     # Rebuild decisions semantic index on full reindex (not incremental)
     if not incremental and config.get("decisions", {}).get("build_semantic_index", True):

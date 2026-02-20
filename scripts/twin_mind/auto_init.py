@@ -6,7 +6,6 @@ from typing import Any
 
 from twin_mind.config import get_config, get_extensions, get_skip_dirs
 from twin_mind.constants import UNSAFE_DIRS
-from twin_mind.entity_graph import rebuild_entity_graph
 from twin_mind.fs import (
     create_gitignore,
     ensure_brain_dir,
@@ -19,6 +18,11 @@ from twin_mind.index_state import save_index_state
 from twin_mind.indexing import collect_files, detect_language
 from twin_mind.memvid_check import get_memvid_sdk
 from twin_mind.output import error, info, success
+
+try:
+    from twin_mind.entity_graph import rebuild_entity_graph
+except ImportError:
+    rebuild_entity_graph = None  # type: ignore[assignment]
 
 
 def is_safe_directory() -> bool:
@@ -137,7 +141,7 @@ def auto_init(args: Any) -> bool:
                 save_index_state(get_current_commit() or "", len(files))
 
             entities_cfg = config.get("entities", {})
-            if entities_cfg.get("enabled", False):
+            if entities_cfg.get("enabled", False) and rebuild_entity_graph:
                 _, entity_count, relation_count = rebuild_entity_graph(files, codebase_root=Path.cwd())
                 print(
                     f"   {success('+')} Extracted {entity_count} entities"

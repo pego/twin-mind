@@ -429,3 +429,81 @@ class TestCmdSearch:
         captured = capsys.readouterr()
         assert "[entity]" in captured.out
         assert "src.auth.authenticate" in captured.out
+
+    def test_search_all_normalizes_mixed_source_scores(
+        self, tmp_path: Any, capsys: Any
+    ) -> None:
+        """Mixed-source ranking should be normalized by rank, not raw score scale."""
+        mock_memvid = MagicMock()
+        mock_mem = MagicMock()
+        mock_mem.find.return_value = {
+            "hits": [
+                {
+                    "title": "top.py",
+                    "text": "def detect_language(): pass",
+                    "score": 10.0,
+                    "uri": "file://top.py",
+                },
+                {
+                    "title": "second.py",
+                    "text": "def detect_language_other(): pass",
+                    "score": 8.0,
+                    "uri": "file://second.py",
+                },
+            ]
+        }
+        mock_memvid.use.return_value.__enter__ = MagicMock(return_value=mock_mem)
+        mock_memvid.use.return_value.__exit__ = MagicMock(return_value=False)
+
+        brain_dir = tmp_path / ".claude"
+        brain_dir.mkdir()
+        code_path = brain_dir / "code.mv2"
+        code_path.touch()
+
+        entity_results = [
+            {
+                "file_path": "scripts/twin_mind/indexing.py",
+                "name": "detect_language",
+                "qualname": "scripts.twin_mind.indexing.detect_language",
+                "kind": "function",
+                "line": 12,
+                "score": 1.0,
+            }
+        ]
+
+        with (
+            patch("twin_mind.commands.search.get_code_path", return_value=code_path),
+            patch("twin_mind.commands.search.get_memory_path", return_value=tmp_path / "none.mv2"),
+            patch("twin_mind.commands.search.get_memvid_sdk", return_value=mock_memvid),
+            patch("twin_mind.commands.search.check_memvid"),
+            patch("twin_mind.commands.search.get_config", return_value={
+                "output": {"color": False},
+                "index": {"adaptive_retrieval": False},
+            }),
+            patch("twin_mind.commands.search.check_stale_index"),
+            patch("twin_mind.commands.search.search_shared_memories", return_value=[]),
+            patch("twin_mind.commands.search.search_entities", return_value=entity_results),
+        ):
+            from twin_mind.commands.search import cmd_search
+
+            args = MockArgs(
+                query="detect_language",
+                scope="all",
+                top_k=3,
+                json=True,
+                context=None,
+                full=False,
+                no_adaptive=False,
+                dir_scope=None,
+            )
+            cmd_search(args)
+
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["results"][0]["source"] == "code"
+        assert output["results"][1]["source"] == "entity"
+        assert output["results"][2]["source"] == "code"
+        assert output["results"][0]["score"] >= output["results"][1]["score"]
+        assert output["results"][1]["score"] > output["results"][2]["score"]
+        assert output["results"][0]["raw_score"] == 10.0
+        assert output["results"][1]["raw_score"] == 1.0

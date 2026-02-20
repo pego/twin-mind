@@ -1,15 +1,92 @@
 """Search command for twin-mind."""
 
 import json
+from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 from twin_mind.config import get_config
-from twin_mind.entity_graph import search_entities
 from twin_mind.fs import get_code_path, get_memory_path
 from twin_mind.index_state import check_stale_index
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
 from twin_mind.shared_memory import search_shared_memories
+
+try:
+    from twin_mind.entity_graph import search_entities
+except ImportError:
+
+    def search_entities(query: str, limit: int = 10) -> list:
+        """Fallback when entity graph module is unavailable in partial upgrades."""
+        return []
+
+
+RRF_K = 20
+SOURCE_WEIGHTS = {
+    "code": 1.0,
+    "entity": 1.0,
+    "shared": 0.9,
+    "memory": 0.8,
+}
+
+
+def _to_float(value: Any) -> float:
+    """Best-effort conversion for score-like values."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _rank_results(results: List[Tuple[str, Dict[str, Any]]], top_k: int) -> List[Tuple[str, Dict[str, Any]]]:
+    """Rank results with cross-source score normalization.
+
+    For single-source result sets, keep native scoring.
+    For mixed-source sets, apply weighted reciprocal-rank fusion (RRF)
+    so scores are comparable across sources.
+    """
+    if not results:
+        return []
+
+    items: List[Dict[str, Any]] = []
+    by_source: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+    for source, hit in results:
+        item = {
+            "source": source,
+            "hit": dict(hit),
+            "raw_score": _to_float(hit.get("score", 0.0)),
+            "rrf_score": 0.0,
+        }
+        items.append(item)
+        by_source[source].append(item)
+
+    # Preserve native ranking when only one source is present.
+    if len(by_source) <= 1:
+        items.sort(key=lambda item: item["raw_score"], reverse=True)
+        for item in items:
+            item["hit"]["raw_score"] = item["raw_score"]
+            item["hit"]["score"] = item["raw_score"]
+        return [(item["source"], item["hit"]) for item in items[:top_k]]
+
+    # Cross-source ranking with weighted RRF.
+    for source, source_items in by_source.items():
+        source_items.sort(key=lambda item: item["raw_score"], reverse=True)
+        weight = SOURCE_WEIGHTS.get(source, 1.0)
+        for rank, item in enumerate(source_items, start=1):
+            item["rrf_score"] = weight / (RRF_K + rank)
+
+    max_weight = max(SOURCE_WEIGHTS.values()) if SOURCE_WEIGHTS else 1.0
+    max_possible = max_weight / (RRF_K + 1)
+    for item in items:
+        normalized = item["rrf_score"] / max_possible if max_possible > 0 else 0.0
+        item["hit"]["raw_score"] = item["raw_score"]
+        item["hit"]["score"] = normalized
+
+    items.sort(
+        key=lambda item: (item["hit"].get("score", 0.0), item["raw_score"]),
+        reverse=True,
+    )
+    return [(item["source"], item["hit"]) for item in items[:top_k]]
 
 
 def cmd_search(args: Any) -> None:
@@ -117,9 +194,8 @@ def cmd_search(args: Any) -> None:
             }
             results.append(("entity", hit))
 
-    # Sort by score and limit
-    results.sort(key=lambda x: x[1].get("score", 0), reverse=True)
-    results = results[: args.top_k]
+    # Normalize/rank and limit
+    results = _rank_results(results, args.top_k)
 
     if not results:
         print(f"No results for: '{args.query}'")
@@ -137,6 +213,7 @@ def cmd_search(args: Any) -> None:
                 "source": source,
                 "file": hit.get("title", ""),
                 "score": hit.get("score", 0),
+                "raw_score": hit.get("raw_score", hit.get("score", 0)),
                 "uri": hit.get("uri", ""),
                 "snippet": hit.get("text", "").strip(),
             }

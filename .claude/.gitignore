@@ -3,9 +3,13 @@
 # code.mv2 - Generated codebase index (regeneratable)
 # index-state.json - Machine-specific index metadata
 # memory.mv2 - Local/personal memories (not shared)
+# decisions.mv2 - Semantic index (regeneratable from decisions.jsonl)
+# entities.sqlite - Entity graph index (regeneratable from code)
 #
 # decisions.jsonl IS versioned - shared team decisions (JSONL = mergeable)
 
 code.mv2
 index-state.json
 memory.mv2
+decisions.mv2
+entities.sqlite

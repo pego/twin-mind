@@ -1,6 +1,6 @@
 """Constants for twin-mind."""
 
-VERSION = "1.9.0"
+VERSION = "1.9.1"
 
 # Directory and file names
 BRAIN_DIR = ".claude"

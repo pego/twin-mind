@@ -28,6 +28,7 @@ CORE_MODULES = [
     "index_state",
     "shared_memory",
     "indexing",
+    "entity_graph",
     "auto_init",
     "cli",
 ]
@@ -46,6 +47,7 @@ COMMAND_MODULES = [
     "reindex",
     "prune",
     "context",
+    "entities",
     "export",
     "doctor",
     "upgrade",
