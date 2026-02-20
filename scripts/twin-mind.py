@@ -28,7 +28,7 @@ from pathlib import Path
 # file for VERSION = "..." to detect the latest release. Keep it in sync with
 # twin_mind/constants.py (the canonical source). The import below overrides it
 # at runtime so only constants.py needs to change for future bumps.
-VERSION = "1.8.3"
+VERSION = "1.9.0"
 
 # Ensure the package directory is in the path so twin_mind can be imported
 _package_dir = Path(__file__).parent

@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from twin_mind.fs import get_code_path, get_memory_path
+from twin_mind.fs import get_code_path, get_entities_db_path, get_memory_path
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
 from twin_mind.output import confirm, format_size, info, success
 
@@ -15,6 +15,7 @@ def cmd_reset(args: Any) -> None:
 
     dry_run = getattr(args, "dry_run", False)
     code_path = get_code_path()
+    entities_path = get_entities_db_path()
     memory_path = get_memory_path()
 
     target = args.target
@@ -27,11 +28,17 @@ def cmd_reset(args: Any) -> None:
             size = format_size(code_path.stat().st_size)
             if dry_run:
                 print(f"   Would reset code store ({size})")
+                if entities_path.exists():
+                    graph_size = format_size(entities_path.stat().st_size)
+                    print(f"   Would reset entity graph ({graph_size})")
             elif args.force or confirm(f"Delete code store ({size})?"):
                 code_path.unlink()
                 with memvid_sdk.use("basic", str(code_path), mode="create") as mem:
                     pass  # Just create empty store
                 print(success("Code store reset"))
+                if entities_path.exists():
+                    entities_path.unlink()
+                    print(success("Entity graph reset"))
             else:
                 print("   Skipped code store")
         else:

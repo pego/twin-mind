@@ -2,6 +2,24 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.9.0] - 2026-02-20
+
+### Added
+- **Entity Extraction (Knowledge Graph) MVP**:
+  - New `entities.sqlite` graph store (generated in `.claude/`, gitignored)
+  - Python AST extraction for entities: `module`, `class`, `function`, `method`
+  - Relationship extraction: `defines`, `calls`, `inherits`, `imports`
+  - New `entities` command:
+    - `entities find <symbol>`
+    - `entities callers <symbol>`
+    - `entities callees <symbol>`
+    - `entities inherits <class>`
+  - `search --in entities` scope for entity-level lookup
+
+### Changed
+- `index` now builds/updates entity graph when `entities.enabled` is true.
+- `reset code` now also resets `entities.sqlite`.
+
 ## [1.8.3] - 2026-02-19
 
 ### Fixed

@@ -379,3 +379,53 @@ class TestCmdSearch:
 
         captured = capsys.readouterr()
         assert "shared" in captured.out.lower() or "JWT" in captured.out
+
+    def test_search_entities_scope(
+        self, tmp_path: Any, capsys: Any
+    ) -> None:
+        """Entity scope should include extracted entity matches."""
+        mock_memvid = MagicMock()
+        mock_mem = MagicMock()
+        mock_mem.find.return_value = {"hits": []}
+        mock_memvid.use.return_value.__enter__ = MagicMock(return_value=mock_mem)
+        mock_memvid.use.return_value.__exit__ = MagicMock(return_value=False)
+
+        entity_results = [
+            {
+                "file_path": "src/auth.py",
+                "name": "authenticate",
+                "qualname": "src.auth.authenticate",
+                "kind": "function",
+                "line": 12,
+                "score": 0.95,
+            }
+        ]
+
+        with (
+            patch("twin_mind.commands.search.get_code_path", return_value=tmp_path / "none.mv2"),
+            patch("twin_mind.commands.search.get_memory_path", return_value=tmp_path / "none.mv2"),
+            patch("twin_mind.commands.search.get_memvid_sdk", return_value=mock_memvid),
+            patch("twin_mind.commands.search.check_memvid"),
+            patch("twin_mind.commands.search.get_config", return_value={
+                "output": {"color": False},
+                "index": {"adaptive_retrieval": False},
+            }),
+            patch("twin_mind.commands.search.search_shared_memories", return_value=[]),
+            patch("twin_mind.commands.search.search_entities", return_value=entity_results),
+        ):
+            from twin_mind.commands.search import cmd_search
+
+            args = MockArgs(
+                query="auth",
+                scope="entities",
+                top_k=5,
+                json=False,
+                context=None,
+                full=False,
+                no_adaptive=False,
+            )
+            cmd_search(args)
+
+        captured = capsys.readouterr()
+        assert "[entity]" in captured.out
+        assert "src.auth.authenticate" in captured.out

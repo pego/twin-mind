@@ -81,7 +81,10 @@ First command in a new project auto-initializes.
 |--------|---------|
 | Find code | `twin-mind search "query" --in code` |
 | Find decisions | `twin-mind search "query" --in memory` |
+| Find entities | `twin-mind search "query" --in entities` |
 | Find both | `twin-mind search "query"` |
+| Find entity symbol | `twin-mind entities find "<symbol>"` |
+| Find callers | `twin-mind entities callers "<symbol>"` |
 | Save insight (local) | `twin-mind remember "message" --tag TAG` |
 | Save insight (shared) | `twin-mind remember "message" --share` |
 | Get context | `twin-mind context "topic"` |
@@ -155,6 +158,7 @@ your-project/.claude/
 ├── code.mv2           # Codebase index (gitignored)
 ├── memory.mv2         # Local memories (gitignored)
 ├── decisions.jsonl    # Shared decisions (versioned, mergeable)
+├── entities.sqlite    # Entity graph (gitignored, regeneratable)
 └── index-state.json   # Index metadata (gitignored)
 ```
 

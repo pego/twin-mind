@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from twin_mind.config import get_config
+from twin_mind.entity_graph import search_entities
 from twin_mind.fs import get_code_path, get_memory_path
 from twin_mind.index_state import check_stale_index
 from twin_mind.memvid_check import check_memvid, get_memvid_sdk
@@ -103,6 +104,19 @@ def cmd_search(args: Any) -> None:
             }
             results.append(("shared", hit))
 
+    # Search extracted entities graph
+    if args.scope in ("entities", "all"):
+        for entity in search_entities(args.query, limit=args.top_k):
+            hit = {
+                "title": f"[{entity['kind']}] {entity['qualname']}",
+                "text": f"{entity['file_path']}:{entity['line']}",
+                "score": entity.get("score", 0.0),
+                "uri": f"twin-mind://entity/{entity['qualname']}",
+                "file_path": entity["file_path"],
+                "line": entity["line"],
+            }
+            results.append(("entity", hit))
+
     # Sort by score and limit
     results.sort(key=lambda x: x[1].get("score", 0), reverse=True)
     results = results[: args.top_k]
@@ -135,6 +149,9 @@ def cmd_search(args: Any) -> None:
                     result_obj["file_path"] = uri[len("twin-mind://code/"):]
                 elif hit.get("title"):
                     result_obj["file_path"] = hit.get("title", "")
+            elif source == "entity":
+                result_obj["file_path"] = hit.get("file_path", "")
+                result_obj["line"] = hit.get("line", 0)
             output["results"].append(result_obj)
         print(json.dumps(output, indent=2))
         return
@@ -144,7 +161,13 @@ def cmd_search(args: Any) -> None:
     print("=" * 60)
 
     for i, (source, hit) in enumerate(results, 1):
-        icon = "[code]" if source == "code" else ("[shared]" if source == "shared" else "[memory]")
+        icon_map = {
+            "code": "[code]",
+            "memory": "[memory]",
+            "shared": "[shared]",
+            "entity": "[entity]",
+        }
+        icon = icon_map.get(source, "[result]")
         title = hit.get("title", "untitled")
 
         print(f"\n{icon} [{i}] {title}")

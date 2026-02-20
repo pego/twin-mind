@@ -117,6 +117,7 @@ def sample_config() -> dict:
             "embedding_model": None,
             "adaptive_retrieval": True,
         },
+        "entities": {"enabled": True},
         "output": {"color": True, "verbose": False},
         "memory": {"share_memories": False, "dedupe": True},
     }

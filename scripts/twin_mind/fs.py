@@ -10,6 +10,7 @@ from twin_mind.constants import (
     BRAIN_DIR,
     CODE_FILE,
     DECISIONS_MV2_FILE,
+    ENTITIES_DB_FILE,
     GITIGNORE_CONTENT,
     GITIGNORE_FILE,
     MEMORY_FILE,
@@ -106,6 +107,11 @@ def get_decisions_path() -> Path:
 def get_decisions_mv2_path() -> Path:
     """Get path to semantic index for shared decisions (regeneratable from JSONL)."""
     return get_brain_dir() / DECISIONS_MV2_FILE
+
+
+def get_entities_db_path() -> Path:
+    """Get path to entities graph SQLite database."""
+    return get_brain_dir() / ENTITIES_DB_FILE
 
 
 def ensure_brain_dir() -> None:

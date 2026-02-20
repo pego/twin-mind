@@ -64,6 +64,7 @@ your-project/.claude/
 ├── code.mv2           # Codebase index (gitignored)
 ├── memory.mv2         # Local memories (gitignored)
 ├── decisions.jsonl    # Shared decisions (versioned, mergeable)
+├── entities.sqlite    # Entity graph (gitignored, regeneratable)
 └── index-state.json   # Index metadata (gitignored)
 ```
 
@@ -91,10 +92,15 @@ your-project/.claude/
 | `search <query>` | Search code + all memories |
 | `search <query> --in code` | Search only code |
 | `search <query> --in memory` | Search only memories (local + shared) |
+| `search <query> --in entities` | Search extracted entities (functions/classes/modules) |
 | `remember <msg>` | Store locally (default) |
 | `remember <msg> --share` | Store to shared decisions |
 | `remember <msg> --local` | Force store locally |
 | `context <query>` | Combined code + local/shared memory for prompts |
+| `entities find <symbol>` | Find extracted entities by symbol or qualified name |
+| `entities callers <symbol>` | Show callers of a symbol |
+| `entities callees <symbol>` | Show callees for a caller symbol |
+| `entities inherits <class>` | Show subclasses of a base class |
 | `status` | Health check |
 | `stats` | Display statistics |
 | `recent` | Show recent memories (local + shared) |

@@ -90,6 +90,60 @@ class TestCmdIndex:
         mock_remove.assert_called_once_with(mock_mem, ["src/a.py", "src/b.py"], verbose=False)
         mock_save_state.assert_called_once_with("def456", 42)
 
+    def test_index_updates_entities_when_enabled(
+        self, tmp_path: Any, capsys: Any
+    ) -> None:
+        """Incremental index updates entity graph when enabled."""
+        brain_dir = tmp_path / ".claude"
+        brain_dir.mkdir()
+        code_path = brain_dir / "code.mv2"
+        code_path.write_bytes(b"stub")
+
+        args = MockArgs(fresh=False, status=False, dry_run=False, verbose=False)
+
+        mock_mem = MagicMock()
+        mock_mem.stats.return_value = {"frame_count": 10}
+        mock_sdk = MagicMock()
+        mock_sdk.use.return_value.__enter__ = MagicMock(return_value=mock_mem)
+        mock_sdk.use.return_value.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch("twin_mind.commands.index.check_memvid"),
+            patch("twin_mind.commands.index.get_memvid_sdk", return_value=mock_sdk),
+            patch("twin_mind.commands.index.get_config", return_value={
+                "output": {"color": False, "verbose": False},
+                "maintenance": {"size_warnings": False},
+                "decisions": {"build_semantic_index": False},
+                "entities": {"enabled": True},
+            }),
+            patch("twin_mind.commands.index.supports_color", return_value=False),
+            patch("twin_mind.commands.index.get_brain_dir", return_value=brain_dir),
+            patch("twin_mind.commands.index.get_code_path", return_value=code_path),
+            patch("twin_mind.commands.index.load_index_state", return_value={"last_commit": "abc123"}),
+            patch("twin_mind.commands.index.is_git_repo", return_value=True),
+            patch("twin_mind.commands.index.get_commits_behind", return_value=1),
+            patch(
+                "twin_mind.commands.index.get_changed_files",
+                return_value=(["src/a.py"], []),
+            ),
+            patch("twin_mind.commands.index.FileLock", return_value=nullcontext()),
+            patch("twin_mind.commands.index.remove_indexed_paths", return_value=0),
+            patch("twin_mind.commands.index.index_files_incremental", return_value=1),
+            patch("twin_mind.commands.index.get_current_commit", return_value="def456"),
+            patch("twin_mind.commands.index.save_index_state"),
+            patch(
+                "twin_mind.commands.index.update_entity_graph_incremental",
+                return_value=(1, 5, 7),
+            ) as mock_entities_update,
+        ):
+            from twin_mind.commands.index import cmd_index
+
+            cmd_index(args)
+
+        captured = capsys.readouterr()
+        assert "Entities: 1 files | 5 entities | 7 relations" in captured.out
+        mock_entities_update.assert_called_once()
+
 
 class TestCollectFiles:
     """Tests for file collection logic."""

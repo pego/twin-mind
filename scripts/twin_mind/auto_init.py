@@ -6,6 +6,7 @@ from typing import Any
 
 from twin_mind.config import get_config, get_extensions, get_skip_dirs
 from twin_mind.constants import UNSAFE_DIRS
+from twin_mind.entity_graph import rebuild_entity_graph
 from twin_mind.fs import (
     create_gitignore,
     ensure_brain_dir,
@@ -134,6 +135,14 @@ def auto_init(args: Any) -> bool:
             # Save index state
             if is_git_repo():
                 save_index_state(get_current_commit() or "", len(files))
+
+            entities_cfg = config.get("entities", {})
+            if entities_cfg.get("enabled", False):
+                _, entity_count, relation_count = rebuild_entity_graph(files, codebase_root=Path.cwd())
+                print(
+                    f"   {success('+')} Extracted {entity_count} entities"
+                    f" ({relation_count} relations)"
+                )
 
         print(f"   {success('+')} Indexed {len(files)} files")
         print(f"   {success('Ready!')}\n")

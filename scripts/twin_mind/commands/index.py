@@ -1,9 +1,11 @@
 """Index command for twin-mind."""
 
 import sys
+from pathlib import Path
 from typing import Any
 
 from twin_mind.config import get_config
+from twin_mind.entity_graph import rebuild_entity_graph, update_entity_graph_incremental
 from twin_mind.fs import FileLock, get_brain_dir, get_code_path, get_decisions_path
 from twin_mind.git import get_changed_files, get_commits_behind, get_current_commit, is_git_repo
 from twin_mind.index_state import load_index_state, save_index_state
@@ -22,6 +24,7 @@ from twin_mind.output import (
     success,
     supports_color,
     warn_if_large,
+    warning,
 )
 from twin_mind.shared_memory import build_decisions_index
 
@@ -129,6 +132,28 @@ def cmd_index(args: Any) -> None:
 
     if config.get("maintenance", {}).get("size_warnings", True):
         warn_if_large(code_path, config.get("maintenance", {}).get("code_max_mb", 50), "Code index")
+
+    # Build/update entities graph from Python files
+    entities_cfg = config.get("entities", {})
+    if entities_cfg.get("enabled", False):
+        try:
+            if incremental:
+                entity_files, entity_count, relation_count = update_entity_graph_incremental(
+                    changed_files,
+                    deleted_files,
+                    config,
+                )
+            else:
+                files = collect_files(config)
+                entity_files, entity_count, relation_count = rebuild_entity_graph(
+                    files, codebase_root=Path.cwd()
+                )
+            print(
+                f"   Entities: {entity_files} files |"
+                f" {entity_count} entities | {relation_count} relations"
+            )
+        except Exception as e:
+            print(warning(f"Entity extraction skipped: {e}"))
 
     # Rebuild decisions semantic index on full reindex (not incremental)
     if not incremental and config.get("decisions", {}).get("build_semantic_index", True):

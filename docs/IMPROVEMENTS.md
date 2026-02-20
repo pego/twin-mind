@@ -190,18 +190,24 @@ Warn when indexes exceed recommended sizes:
 ## Phase 3: Advanced Features
 
 ### 3.1 Entity Extraction (Knowledge Graph)
-**Status:** 🔲 Not Started
+**Status:** 🚧 In Progress (Python MVP)
 **Impact:** Powerful code queries
 **Effort:** Medium
 
 Extract code entities (classes, functions, types) with relationships.
 
-```python
-# Index with entity extraction
-mem.put(content, extract_entities=True)
+**MVP delivered:**
+- Python AST extraction to `entities.sqlite`
+- Relations: `defines`, `calls`, `inherits`, `imports`
+- CLI queries: `entities find/callers/callees/inherits`
+- Search scope integration: `search --in entities`
+
+```bash
+# Build graph during index
+twin-mind index --fresh
 
 # Query relationships
-mem.query_entities("authenticate", relationship="calls")
+twin-mind entities callers authenticate
 ```
 
 **Enables:**

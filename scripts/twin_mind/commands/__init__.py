@@ -3,6 +3,7 @@
 from twin_mind.commands.ask import cmd_ask
 from twin_mind.commands.context import cmd_context
 from twin_mind.commands.doctor import cmd_doctor
+from twin_mind.commands.entities import cmd_entities
 from twin_mind.commands.export import cmd_export
 from twin_mind.commands.index import cmd_index
 from twin_mind.commands.init import cmd_init
@@ -35,6 +36,7 @@ __all__ = [
     "cmd_reindex",
     "cmd_prune",
     "cmd_context",
+    "cmd_entities",
     "cmd_export",
     "cmd_doctor",
     "cmd_upgrade",
