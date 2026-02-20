@@ -98,15 +98,16 @@ your-project/.claude/
 | `remember <msg> --local` | Force store locally |
 | `context <query>` | Combined code + local/shared memory for prompts |
 | `entities find <symbol>` | Find extracted entities by symbol or qualified name |
-| `entities callers <symbol>` | Show callers of a symbol |
-| `entities callees <symbol>` | Show callees for a caller symbol |
-| `entities inherits <class>` | Show subclasses of a base class |
+| `entities callers <symbol> [--resolved-only]` | Show callers of a symbol |
+| `entities callees <symbol> [--resolved-only]` | Show callees for a caller symbol |
+| `entities inherits <class> [--resolved-only]` | Show subclasses of a base class |
 | `status` | Health check |
 | `stats` | Display statistics |
 | `recent` | Show recent memories (local + shared) |
 
 When searching mixed sources (`--in all`), Twin-Mind normalizes ranking across sources.
 In `--json` output, `score` is normalized and `raw_score` is source-native.
+For entity relationships, use `--resolved-only` to return only edges linked to extracted entities.
 
 ### Index Commands
 

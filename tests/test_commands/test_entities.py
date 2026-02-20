@@ -91,3 +91,35 @@ class TestCmdEntities:
 
         captured = capsys.readouterr()
         assert "src.api.login -> authenticate" in captured.out
+
+    @patch("twin_mind.commands.entities.find_callers")
+    @patch("twin_mind.commands.entities.get_entities_db_path")
+    def test_entities_callers_resolved_only_flag(
+        self,
+        mock_get_entities_db_path: MagicMock,
+        mock_find_callers: MagicMock,
+        temp_dir: Path,
+        capsys: MagicMock,
+    ) -> None:
+        """Callers action forwards --resolved-only to graph queries."""
+        db_path = temp_dir / ".claude" / "entities.sqlite"
+        db_path.parent.mkdir(parents=True)
+        db_path.write_text("")
+        mock_get_entities_db_path.return_value = db_path
+        mock_find_callers.return_value = []
+
+        from twin_mind.commands.entities import cmd_entities
+
+        cmd_entities(
+            Namespace(
+                action="callers",
+                symbol="authenticate",
+                limit=10,
+                json=True,
+                resolved_only=True,
+            )
+        )
+
+        mock_find_callers.assert_called_once_with("authenticate", limit=10, resolved_only=True)
+        output = json.loads(capsys.readouterr().out)
+        assert output["count"] == 0

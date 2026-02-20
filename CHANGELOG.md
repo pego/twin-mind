@@ -2,6 +2,20 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.9.2] - 2026-02-20
+
+### Added
+- **Linked relationship resolution for Entity Graph**:
+  - `relations` now stores `src_entity_id`, `dst_entity_id`, `resolved`, and `confidence`
+  - Relationship queries now prefer linked entity nodes when available
+  - New `--resolved-only` flag for `entities callers`, `entities callees`, and `entities inherits`
+
+### Changed
+- **Entity graph indexing now performs a relation-resolution pass**:
+  - Rebuild and incremental index flows now resolve textual edges to concrete entity IDs
+  - Existing `entities.sqlite` databases are automatically migrated to the new linked-edge schema
+  - Relationship query results include resolution metadata (`resolved`, `confidence`) in JSON output
+
 ## [1.9.1] - 2026-02-20
 
 ### Fixed

@@ -174,16 +174,31 @@ Repository: https://github.com/pego/twin-mind
         p_entities_callers = p_entities_sub.add_parser("callers", help="Find callers of a symbol")
         p_entities_callers.add_argument("symbol", help="Symbol to inspect")
         p_entities_callers.add_argument("--limit", "-k", type=int, default=20, help="Max results")
+        p_entities_callers.add_argument(
+            "--resolved-only",
+            action="store_true",
+            help="Only return relationships resolved to known entities",
+        )
         p_entities_callers.add_argument("--json", "-j", action="store_true", help="Output as JSON")
 
         p_entities_callees = p_entities_sub.add_parser("callees", help="Find callees for a symbol")
         p_entities_callees.add_argument("symbol", help="Caller symbol to inspect")
         p_entities_callees.add_argument("--limit", "-k", type=int, default=20, help="Max results")
+        p_entities_callees.add_argument(
+            "--resolved-only",
+            action="store_true",
+            help="Only return relationships resolved to known entities",
+        )
         p_entities_callees.add_argument("--json", "-j", action="store_true", help="Output as JSON")
 
         p_entities_inherits = p_entities_sub.add_parser("inherits", help="Find subclasses")
         p_entities_inherits.add_argument("symbol", help="Base class symbol")
         p_entities_inherits.add_argument("--limit", "-k", type=int, default=20, help="Max results")
+        p_entities_inherits.add_argument(
+            "--resolved-only",
+            action="store_true",
+            help="Only return relationships resolved to known entities",
+        )
         p_entities_inherits.add_argument("--json", "-j", action="store_true", help="Output as JSON")
 
     # export

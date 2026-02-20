@@ -24,22 +24,28 @@ def _print_find_results(results: List[Dict[str, Any]]) -> None:
 
 def _print_caller_results(results: List[Dict[str, Any]]) -> None:
     for idx, result in enumerate(results, 1):
+        resolved = bool(result.get("resolved", True))
+        suffix = "" if resolved else " [unresolved]"
         print(
             f"[{idx}] {result.get('caller')} -> {result.get('callee')}"
-            f" [{result.get('caller_kind', 'unknown')}]"
+            f" [{result.get('caller_kind', 'unknown')}]{suffix}"
         )
         print(f"    {result['file_path']}:{result['line']}")
 
 
 def _print_callee_results(results: List[Dict[str, Any]]) -> None:
     for idx, result in enumerate(results, 1):
-        print(f"[{idx}] {result.get('caller')} -> {result.get('callee')}")
+        resolved = bool(result.get("resolved", True))
+        suffix = "" if resolved else " [unresolved]"
+        print(f"[{idx}] {result.get('caller')} -> {result.get('callee')}{suffix}")
         print(f"    {result['file_path']}:{result['line']}")
 
 
 def _print_subclass_results(results: List[Dict[str, Any]]) -> None:
     for idx, result in enumerate(results, 1):
-        print(f"[{idx}] {result.get('subclass')} inherits {result.get('base_class')}")
+        resolved = bool(result.get("resolved", True))
+        suffix = "" if resolved else " [unresolved]"
+        print(f"[{idx}] {result.get('subclass')} inherits {result.get('base_class')}{suffix}")
         print(f"    {result['file_path']}:{result['line']}")
 
 
@@ -54,6 +60,7 @@ def cmd_entities(args: Any) -> None:
     symbol = getattr(args, "symbol", "")
     limit = int(getattr(args, "limit", 20))
     emit_json = bool(getattr(args, "json", False))
+    resolved_only = bool(getattr(args, "resolved_only", False))
 
     title = ""
     results: List[Dict[str, Any]]
@@ -63,13 +70,13 @@ def cmd_entities(args: Any) -> None:
         results = find_entities(symbol, kind=kind, limit=limit)
         title = f"Entities matching: '{symbol}'"
     elif action == "callers":
-        results = find_callers(symbol, limit=limit)
+        results = find_callers(symbol, limit=limit, resolved_only=resolved_only)
         title = f"Callers of: '{symbol}'"
     elif action == "callees":
-        results = find_callees(symbol, limit=limit)
+        results = find_callees(symbol, limit=limit, resolved_only=resolved_only)
         title = f"Callees of: '{symbol}'"
     elif action == "inherits":
-        results = find_subclasses(symbol, limit=limit)
+        results = find_subclasses(symbol, limit=limit, resolved_only=resolved_only)
         title = f"Subclasses of: '{symbol}'"
     else:
         print(f"Unknown entities action: {action}")

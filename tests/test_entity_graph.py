@@ -1,5 +1,6 @@
 """Tests for twin_mind.entity_graph module."""
 
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict
 
@@ -79,9 +80,14 @@ def login(token):
 
         callers = find_callers("authenticate")
         assert any(item["caller"].endswith(".login") for item in callers)
+        assert any(item["resolved"] for item in callers)
+
+        resolved_callers = find_callers("authenticate", resolved_only=True)
+        assert any(item["callee"].endswith(".authenticate") for item in resolved_callers)
 
         callees = find_callees("login")
         assert any("authenticate" in item["callee"] for item in callees)
+        assert any(item["resolved"] for item in callees)
 
         # sample_config is intentionally passed to exercise the public incremental API shape.
         assert sample_config["max_file_size"] == "500KB"
@@ -134,3 +140,97 @@ def login(token):
         assert find_entities("foo") == []
         assert find_entities("bar")
         assert find_callers("bar")
+        assert find_callers("bar", resolved_only=True)
+
+    def test_resolved_only_filters_unresolved_calls(
+        self, temp_dir: Path, sample_config: Dict[str, Any]
+    ) -> None:
+        api = temp_dir / "api.py"
+        api.write_text(
+            """
+def login(token):
+    return external.authenticate(token)
+"""
+        )
+
+        rebuild_entity_graph([api], codebase_root=temp_dir)
+
+        callers = find_callers("external.authenticate")
+        assert callers
+        assert all(not item["resolved"] for item in callers)
+        assert find_callers("external.authenticate", resolved_only=True) == []
+
+        # sample_config is intentionally passed to exercise the public incremental API shape.
+        assert sample_config["entities"]["enabled"] is True
+
+    def test_migrates_old_relations_schema_to_linked_edges(
+        self, temp_dir: Path, sample_config: Dict[str, Any]
+    ) -> None:
+        db_path = temp_dir / ".claude" / "entities.sqlite"
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS entities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    qualname TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    line INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS relations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT NOT NULL,
+                    src_qualname TEXT NOT NULL,
+                    dst_name TEXT NOT NULL,
+                    relation TEXT NOT NULL,
+                    line INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            conn.commit()
+
+        service = temp_dir / "service.py"
+        service.write_text(
+            """
+def authenticate(token):
+    return token
+"""
+        )
+        api = temp_dir / "api.py"
+        api.write_text(
+            """
+from service import authenticate
+
+def login(token):
+    return authenticate(token)
+"""
+        )
+
+        rebuild_entity_graph([service, api], codebase_root=temp_dir)
+
+        with sqlite3.connect(db_path) as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(relations)").fetchall()}
+            assert {"src_entity_id", "dst_entity_id", "resolved", "confidence"} <= columns
+
+            row = conn.execute(
+                """
+                SELECT src_entity_id, dst_entity_id, resolved, confidence
+                FROM relations
+                WHERE relation = 'calls'
+                LIMIT 1
+                """
+            ).fetchone()
+            assert row is not None
+            assert row[0] is not None
+            assert row[1] is not None
+            assert row[2] == 1
+            assert row[3] > 0
+
+        # sample_config is intentionally passed to exercise the public incremental API shape.
+        assert sample_config["max_file_size"] == "500KB"
