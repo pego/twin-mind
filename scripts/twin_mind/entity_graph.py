@@ -16,6 +16,7 @@ class _PythonEntityVisitor(ast.NodeVisitor):
     def __init__(self, file_path: str) -> None:
         self.file_path = file_path
         self.module_name = _module_name_from_path(file_path)
+        self.is_package_init = Path(file_path).stem == "__init__"
         self.entities: List[Dict[str, Any]] = []
         self.relations: List[Dict[str, Any]] = []
         self._scope_stack: List[str] = [self.module_name]
@@ -119,19 +120,37 @@ class _PythonEntityVisitor(ast.NodeVisitor):
         for alias in node.names:
             imported = alias.name.strip()
             if imported:
-                self._add_relation(src, imported, "imports", getattr(node, "lineno", 0))
+                line = getattr(node, "lineno", 0)
+                self._add_relation(src, imported, "imports", line)
+
+                local_name = alias.asname.strip() if alias.asname else ""
+                target = imported
+                if not local_name and "." in imported:
+                    first = imported.split(".", 1)[0]
+                    local_name = first
+                    target = first
+                if local_name:
+                    self._add_relation(src, f"{local_name}={target}", "imports_alias", line)
         self.generic_visit(node)
         return None
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> Any:
         src = self._current_scope()
-        module = (node.module or "").strip()
+        module = _resolve_import_module(
+            module_name=self.module_name,
+            module=(node.module or "").strip(),
+            level=int(getattr(node, "level", 0) or 0),
+            is_package_init=self.is_package_init,
+        )
+        line = getattr(node, "lineno", 0)
         for alias in node.names:
             leaf = alias.name.strip()
-            if not leaf:
+            if not leaf or leaf == "*":
                 continue
             imported = f"{module}.{leaf}" if module else leaf
-            self._add_relation(src, imported, "imports", getattr(node, "lineno", 0))
+            self._add_relation(src, imported, "imports", line)
+            if alias.asname:
+                self._add_relation(src, f"{alias.asname.strip()}={imported}", "imports_alias", line)
         self.generic_visit(node)
         return None
 
@@ -159,6 +178,42 @@ def _expr_to_name(node: ast.AST) -> str:
     if isinstance(node, ast.Subscript):
         return _expr_to_name(node.value)
     return ""
+
+
+def _resolve_import_module(
+    module_name: str, module: str, level: int, is_package_init: bool = False
+) -> str:
+    module = module.strip()
+    if level <= 0:
+        return module
+
+    if is_package_init:
+        base_package = module_name
+    else:
+        base_package = module_name.rsplit(".", 1)[0] if "." in module_name else ""
+
+    parts = [part for part in base_package.split(".") if part]
+    climb = max(level - 1, 0)
+    if climb >= len(parts):
+        parts = []
+    elif climb:
+        parts = parts[: -climb]
+
+    if module:
+        parts.extend(part for part in module.split(".") if part)
+    return ".".join(parts)
+
+
+def _parse_import_alias(raw: str) -> Tuple[str, str]:
+    value = raw.strip()
+    if "=" not in value:
+        return "", ""
+    alias, target = value.split("=", 1)
+    alias = alias.strip().lower()
+    target = target.strip().lower()
+    if not alias or not target:
+        return "", ""
+    return alias, target
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> Set[str]:
@@ -560,18 +615,27 @@ def _resolve_relations(conn: sqlite3.Connection) -> None:
     imports_by_scope: Dict[str, Dict[str, Set[str]]] = {}
     import_rows = conn.execute(
         """
-        SELECT src_qualname, dst_name
+        SELECT src_qualname, dst_name, relation
         FROM relations
-        WHERE relation = 'imports'
+        WHERE relation IN ('imports', 'imports_alias')
         """
     ).fetchall()
     for row in import_rows:
         scope = str(row["src_qualname"]).strip().lower()
-        imported = str(row["dst_name"]).strip().lower()
-        if not scope or not imported:
+        raw_value = str(row["dst_name"]).strip()
+        relation_kind = str(row["relation"]).strip().lower()
+        if not scope or not raw_value:
             continue
-        leaf = imported.split(".")[-1]
+
         scoped = imports_by_scope.setdefault(scope, {})
+        if relation_kind == "imports_alias":
+            alias, target = _parse_import_alias(raw_value)
+            if alias and target:
+                scoped.setdefault(alias, set()).add(target)
+            continue
+
+        imported = raw_value.lower()
+        leaf = imported.split(".")[-1]
         scoped.setdefault(leaf, set()).add(imported)
 
     updates: List[Tuple[Optional[int], Optional[int], int, float, int]] = []

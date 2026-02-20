@@ -203,6 +203,7 @@ Extract code entities (classes, functions, types) with relationships.
 - Search scope integration: `search --in entities`
 - Linked-edge resolution metadata in graph (`src_entity_id`, `dst_entity_id`, `resolved`, `confidence`)
 - `--resolved-only` query mode for `entities callers/callees/inherits`
+- Alias-aware and relative-import aware linking for Python call resolution
 
 ```bash
 # Build graph during index

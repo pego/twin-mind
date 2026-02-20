@@ -2,6 +2,18 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.9.3] - 2026-02-20
+
+### Added
+- **Entity graph import resolution upgrades**:
+  - Extracts import alias bindings (`imports_alias`) for `import x as y` and `from x import y as z`
+  - Resolves relative imports (`from .`, `from ..`) to absolute module symbols during extraction
+
+### Changed
+- **Entity call resolution now uses import aliases**:
+  - Alias-based calls (for example `alias.fn()` and imported name aliases) can resolve to linked entity nodes
+  - Improves `entities callers/callees --resolved-only` coverage in multi-module Python packages
+
 ## [1.9.2] - 2026-02-20
 
 ### Added

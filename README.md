@@ -108,6 +108,7 @@ your-project/.claude/
 When searching mixed sources (`--in all`), Twin-Mind normalizes ranking across sources.
 In `--json` output, `score` is normalized and `raw_score` is source-native.
 For entity relationships, use `--resolved-only` to return only edges linked to extracted entities.
+Entity resolution supports Python import aliases and relative imports for better cross-file linking.
 
 ### Index Commands
 

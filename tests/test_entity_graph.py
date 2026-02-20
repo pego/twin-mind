@@ -43,6 +43,19 @@ def helper(token):
         assert ("calls", "src.auth.Service.authenticate", "helper") in rel_kinds
         assert ("imports", "src.auth", "utils") in rel_kinds
 
+    def test_extracts_import_alias_and_relative_imports(self) -> None:
+        source = """
+import pkg.helpers as helpers_mod
+from .auth import authenticate as auth_fn
+"""
+        _, relations = extract_python_entities("pkg/api.py", source)
+
+        rel_kinds = {(rel["relation"], rel["src_qualname"], rel["dst_name"]) for rel in relations}
+        assert ("imports", "pkg.api", "pkg.helpers") in rel_kinds
+        assert ("imports_alias", "pkg.api", "helpers_mod=pkg.helpers") in rel_kinds
+        assert ("imports", "pkg.api", "pkg.auth.authenticate") in rel_kinds
+        assert ("imports_alias", "pkg.api", "auth_fn=pkg.auth.authenticate") in rel_kinds
+
 
 class TestEntityGraphLifecycle:
     """Tests for graph build and query flows."""
@@ -162,6 +175,43 @@ def login(token):
 
         # sample_config is intentionally passed to exercise the public incremental API shape.
         assert sample_config["entities"]["enabled"] is True
+
+    def test_resolves_alias_and_relative_import_calls(
+        self, temp_dir: Path, sample_config: Dict[str, Any]
+    ) -> None:
+        package_dir = temp_dir / "pkg"
+        sub_dir = package_dir / "sub"
+        sub_dir.mkdir(parents=True, exist_ok=True)
+
+        helpers = package_dir / "helpers.py"
+        helpers.write_text(
+            """
+def authenticate(token):
+    return token
+"""
+        )
+        api = sub_dir / "api.py"
+        api.write_text(
+            """
+import pkg.helpers as helpers_mod
+from ..helpers import authenticate as auth_fn
+
+def login(token):
+    auth_fn(token)
+    return helpers_mod.authenticate(token)
+"""
+        )
+
+        rebuild_entity_graph([helpers, api], codebase_root=temp_dir)
+
+        callers = find_callers("authenticate", resolved_only=True)
+        login_callers = [item for item in callers if item["caller"].endswith(".login")]
+        assert len(login_callers) == 2
+        assert all(item["callee"].endswith("pkg.helpers.authenticate") for item in login_callers)
+        assert all(item["resolved"] for item in login_callers)
+
+        # sample_config is intentionally passed to exercise the public incremental API shape.
+        assert sample_config["max_file_size"] == "500KB"
 
     def test_migrates_old_relations_schema_to_linked_edges(
         self, temp_dir: Path, sample_config: Dict[str, Any]
