@@ -2,6 +2,28 @@
 
 All notable changes to Twin-Mind will be documented in this file.
 
+## [1.10.0] - 2026-02-20
+
+### Added
+- **Entity graph multi-language foundation**:
+  - Introduced pluggable extractor registry (`entity_extractors.py`) with language-dispatch by extension
+  - Added JavaScript/TypeScript extraction baseline (`.js/.jsx/.mjs/.cjs/.ts/.tsx`)
+  - Added optional Oxc parser backend (`js_oxc.py`) for JS/TS AST extraction when `node` + `oxc-parser` are available
+
+- **Richer relationship types**:
+  - Added derived `instantiates` edges (constructor-style class usage)
+  - Added derived `overrides` edges (method override detection from inheritance links)
+
+### Changed
+- **Entity graph extraction pipeline**:
+  - Rebuild/incremental graph indexing now routes through extractor registry instead of hardcoded Python-only checks
+  - Existing query pipeline (`entities find/callers/callees/inherits`) works across Python and JS/TS extracted symbols
+
+- **Install/upgrade runtime behavior**:
+  - `install.sh` now best-effort installs `oxc-parser` into `~/.twin-mind` when `node` + `npm` are available
+  - `upgrade` now best-effort installs/updates `oxc-parser` runtime
+  - Remote installer module lists updated to include entity graph modules and entities command consistently
+
 ## [1.9.3] - 2026-02-20
 
 ### Added

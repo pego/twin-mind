@@ -1,7 +1,9 @@
 """Upgrade command for twin-mind."""
 
+import json
 import re
 import shutil
+import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -28,6 +30,8 @@ CORE_MODULES = [
     "index_state",
     "shared_memory",
     "indexing",
+    "entity_extractors",
+    "js_oxc",
     "entity_graph",
     "auto_init",
     "cli",
@@ -109,6 +113,45 @@ def _download_release_bundle(repo_url: str) -> Dict[str, str]:
         except Exception as e:
             raise RuntimeError(f"Failed to download {rel_path}: {e}") from e
     return bundle
+
+
+def _install_oxc_parser_runtime(install_dir: Path) -> None:
+    """Best-effort install of optional oxc-parser runtime backend."""
+    npm = shutil.which("npm")
+    node = shutil.which("node")
+    if not npm or not node:
+        print(warning("Node.js/npm not found - oxc-parser install skipped (fallback parser active)."))
+        return
+
+    package_json = install_dir / "package.json"
+    if not package_json.exists():
+        package_json.write_text(
+            json.dumps({"name": "twin-mind-runtime", "private": True}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    try:
+        completed = subprocess.run(
+            [npm, "install", "--silent", "--no-audit", "--no-fund", "--prefix", str(install_dir), "oxc-parser"],
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(warning(f"oxc-parser install skipped: {exc}"))
+        return
+
+    if completed.returncode == 0:
+        print(f"   {success('+')} Installed/updated oxc-parser runtime")
+        return
+
+    detail = (completed.stderr or completed.stdout or "").strip()
+    if detail:
+        detail = detail.splitlines()[-1]
+        print(warning(f"oxc-parser install skipped: {detail}"))
+    else:
+        print(warning("oxc-parser install skipped (npm failed)."))
 
 
 def cmd_upgrade(args: Any) -> None:
@@ -249,6 +292,8 @@ def cmd_upgrade(args: Any) -> None:
         skills_sh_path.write_text(bundle["install-skills.sh"], encoding="utf-8")
         skills_sh_path.chmod(0o755)
         print(f"   {success('+')} Updated install-skills.sh")
+
+        _install_oxc_parser_runtime(INSTALL_DIR)
 
         print(f"\n{success('Upgrade complete!')}")
         print(f"   Now running version {latest_version}")

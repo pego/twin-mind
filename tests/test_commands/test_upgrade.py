@@ -56,12 +56,14 @@ class TestCmdUpgrade:
         version_file = install_dir / "version.txt"
         version_file.write_text("1.8.1")
 
-        with (
-            patch("twin_mind.commands.upgrade.Path.home", return_value=tmp_path),
-            patch("twin_mind.commands.upgrade.get_config", return_value={"output": {"color": False}}),
-            patch("twin_mind.commands.upgrade.supports_color", return_value=False),
-            patch("twin_mind.commands.upgrade._fetch_url", return_value='VERSION = "1.8.2"'),
-            patch("twin_mind.commands.upgrade._download_release_bundle") as mock_download_bundle,
+        with patch("twin_mind.commands.upgrade.Path.home", return_value=tmp_path), patch(
+            "twin_mind.commands.upgrade.get_config", return_value={"output": {"color": False}}
+        ), patch("twin_mind.commands.upgrade.supports_color", return_value=False), patch(
+            "twin_mind.commands.upgrade._fetch_url", return_value='VERSION = "1.8.2"'
+        ), patch(
+            "twin_mind.commands.upgrade._download_release_bundle"
+        ) as mock_download_bundle, patch(
+            "twin_mind.commands.upgrade._install_oxc_parser_runtime"
         ):
             from twin_mind.commands.upgrade import cmd_upgrade
 
@@ -88,12 +90,14 @@ class TestCmdUpgrade:
 
         bundle = _build_bundle()
 
-        with (
-            patch("twin_mind.commands.upgrade.Path.home", return_value=tmp_path),
-            patch("twin_mind.commands.upgrade.get_config", return_value={"output": {"color": False}}),
-            patch("twin_mind.commands.upgrade.supports_color", return_value=False),
-            patch("twin_mind.commands.upgrade._fetch_url", return_value='VERSION = "1.8.2"'),
-            patch("twin_mind.commands.upgrade._download_release_bundle", return_value=bundle),
+        with patch("twin_mind.commands.upgrade.Path.home", return_value=tmp_path), patch(
+            "twin_mind.commands.upgrade.get_config", return_value={"output": {"color": False}}
+        ), patch("twin_mind.commands.upgrade.supports_color", return_value=False), patch(
+            "twin_mind.commands.upgrade._fetch_url", return_value='VERSION = "1.8.2"'
+        ), patch(
+            "twin_mind.commands.upgrade._download_release_bundle", return_value=bundle
+        ), patch(
+            "twin_mind.commands.upgrade._install_oxc_parser_runtime"
         ):
             from twin_mind.commands.upgrade import cmd_upgrade
 
@@ -136,12 +140,14 @@ class TestCmdUpgrade:
 
         monkeypatch.setattr(Path, "write_text", flaky_write_text)
 
-        with (
-            patch("twin_mind.commands.upgrade.Path.home", return_value=tmp_path),
-            patch("twin_mind.commands.upgrade.get_config", return_value={"output": {"color": False}}),
-            patch("twin_mind.commands.upgrade.supports_color", return_value=False),
-            patch("twin_mind.commands.upgrade._fetch_url", return_value='VERSION = "1.8.2"'),
-            patch("twin_mind.commands.upgrade._download_release_bundle", return_value=bundle),
+        with patch("twin_mind.commands.upgrade.Path.home", return_value=tmp_path), patch(
+            "twin_mind.commands.upgrade.get_config", return_value={"output": {"color": False}}
+        ), patch("twin_mind.commands.upgrade.supports_color", return_value=False), patch(
+            "twin_mind.commands.upgrade._fetch_url", return_value='VERSION = "1.8.2"'
+        ), patch(
+            "twin_mind.commands.upgrade._download_release_bundle", return_value=bundle
+        ), patch(
+            "twin_mind.commands.upgrade._install_oxc_parser_runtime"
         ):
             from twin_mind.commands.upgrade import cmd_upgrade
 

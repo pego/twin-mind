@@ -190,7 +190,7 @@ Warn when indexes exceed recommended sizes:
 ## Phase 3: Advanced Features
 
 ### 3.1 Entity Extraction (Knowledge Graph)
-**Status:** 🚧 In Progress (Python MVP)
+**Status:** 🚧 In Progress (Python + JS/TS baseline)
 **Impact:** Powerful code queries
 **Effort:** Medium
 
@@ -198,12 +198,15 @@ Extract code entities (classes, functions, types) with relationships.
 
 **MVP delivered:**
 - Python AST extraction to `entities.sqlite`
+- JavaScript/TypeScript extraction baseline (`.js/.jsx/.mjs/.cjs/.ts/.tsx`)
 - Relations: `defines`, `calls`, `inherits`, `imports`
 - CLI queries: `entities find/callers/callees/inherits`
 - Search scope integration: `search --in entities`
 - Linked-edge resolution metadata in graph (`src_entity_id`, `dst_entity_id`, `resolved`, `confidence`)
 - `--resolved-only` query mode for `entities callers/callees/inherits`
 - Alias-aware and relative-import aware linking for Python call resolution
+- Derived relations: `instantiates`, `overrides`
+- Optional Oxc parser backend for JS/TS (auto-used when available)
 
 ```bash
 # Build graph during index

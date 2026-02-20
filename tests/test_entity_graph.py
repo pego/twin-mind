@@ -3,19 +3,56 @@
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict
+from unittest.mock import patch
 
 from twin_mind.entity_graph import (
+    extract_entities,
     extract_python_entities,
     find_callees,
     find_callers,
     find_entities,
     rebuild_entity_graph,
+    supported_entity_languages,
     update_entity_graph_incremental,
 )
 
 
 class TestExtractPythonEntities:
     """Tests for Python AST extraction."""
+
+    @patch("twin_mind.entity_graph.extract_javascript_entities_with_oxc")
+    def test_javascript_extractor_uses_oxc_when_available(self, mock_oxc: Any) -> None:
+        mock_oxc.return_value = (
+            [
+                {
+                    "file_path": "src/app.js",
+                    "name": "src.app",
+                    "qualname": "src.app",
+                    "kind": "module",
+                    "line": 1,
+                }
+            ],
+            [],
+        )
+
+        entities, relations = extract_entities("src/app.js", "function login() {}")
+        assert entities
+        assert relations == []
+        mock_oxc.assert_called_once()
+
+    def test_extractor_registry_dispatches_by_extension(self) -> None:
+        entities, relations = extract_entities("src/app.go", "package main\n")
+        assert entities == []
+        assert relations == []
+
+        js_entities, _ = extract_entities("src/app.js", "function login() { return true; }")
+        assert any(entity["qualname"].endswith(".login") for entity in js_entities)
+
+        py_entities, _ = extract_entities("src/app.py", "def login():\n    return True\n")
+        assert any(entity["qualname"].endswith(".login") for entity in py_entities)
+        assert "python" in supported_entity_languages()
+        assert "javascript" in supported_entity_languages()
+        assert "typescript" in supported_entity_languages()
 
     def test_extracts_entities_and_relations(self) -> None:
         source = """
@@ -55,6 +92,38 @@ from .auth import authenticate as auth_fn
         assert ("imports_alias", "pkg.api", "helpers_mod=pkg.helpers") in rel_kinds
         assert ("imports", "pkg.api", "pkg.auth.authenticate") in rel_kinds
         assert ("imports_alias", "pkg.api", "auth_fn=pkg.auth.authenticate") in rel_kinds
+
+    def test_extracts_javascript_entities_and_relations(self) -> None:
+        source = """
+import { authenticate as authFn } from "./service.js";
+import * as serviceNs from "./service.js";
+
+class ApiClient extends BaseClient {
+  login(token) {
+    authFn(token);
+    return serviceNs.authenticate(token);
+  }
+}
+
+export function bootstrap(token) {
+  return new ApiClient();
+}
+"""
+        entities, relations = extract_entities("src/api.js", source)
+
+        qualnames = {entity["qualname"] for entity in entities}
+        assert "src.api.ApiClient" in qualnames
+        assert "src.api.ApiClient.login" in qualnames
+        assert "src.api.bootstrap" in qualnames
+
+        rel_kinds = {(rel["relation"], rel["src_qualname"], rel["dst_name"]) for rel in relations}
+        assert ("inherits", "src.api.ApiClient", "BaseClient") in rel_kinds
+        assert ("imports", "src.api", "src.service.authenticate") in rel_kinds
+        assert ("imports_alias", "src.api", "authFn=src.service.authenticate") in rel_kinds
+        assert ("imports_alias", "src.api", "serviceNs=src.service") in rel_kinds
+        assert ("calls", "src.api.ApiClient.login", "authFn") in rel_kinds
+        assert ("calls", "src.api.ApiClient.login", "serviceNs.authenticate") in rel_kinds
+        assert ("calls", "src.api.bootstrap", "ApiClient") in rel_kinds
 
 
 class TestEntityGraphLifecycle:
@@ -104,6 +173,52 @@ def login(token):
 
         # sample_config is intentionally passed to exercise the public incremental API shape.
         assert sample_config["max_file_size"] == "500KB"
+
+    def test_rebuild_and_query_typescript_call_graph(
+        self, temp_dir: Path, sample_config: Dict[str, Any]
+    ) -> None:
+        service = temp_dir / "service.ts"
+        service.write_text(
+            """
+export function authenticate(token: string) {
+    return token;
+}
+"""
+        )
+        api = temp_dir / "api.ts"
+        api.write_text(
+            """
+import { authenticate as authFn } from "./service";
+import * as serviceNs from "./service";
+
+export function login(token: string) {
+    return authFn(token);
+}
+
+export function loginViaNs(token: string) {
+    return serviceNs.authenticate(token);
+}
+"""
+        )
+
+        indexed_files, entity_count, relation_count = rebuild_entity_graph(
+            [service, api], codebase_root=temp_dir
+        )
+
+        assert indexed_files == 2
+        assert entity_count > 0
+        assert relation_count > 0
+
+        callers = find_callers("authenticate", resolved_only=True)
+        assert any(item["caller"].endswith(".login") for item in callers)
+        assert any(item["caller"].endswith(".loginViaNs") for item in callers)
+        assert all(item["callee"].endswith("service.authenticate") for item in callers)
+
+        callees = find_callees("loginViaNs", resolved_only=True)
+        assert any(item["callee"].endswith("service.authenticate") for item in callees)
+
+        # sample_config is intentionally passed to exercise the public incremental API shape.
+        assert sample_config["entities"]["enabled"] is True
 
     def test_incremental_update_replaces_old_symbols(
         self, temp_dir: Path, sample_config: Dict[str, Any]
@@ -284,3 +399,58 @@ def login(token):
 
         # sample_config is intentionally passed to exercise the public incremental API shape.
         assert sample_config["max_file_size"] == "500KB"
+
+    def test_derives_instantiates_and_overrides_relations(
+        self, temp_dir: Path, sample_config: Dict[str, Any]
+    ) -> None:
+        models = temp_dir / "models.py"
+        models.write_text(
+            """
+class BaseService:
+    def run(self):
+        return "base"
+
+class Service(BaseService):
+    def run(self):
+        return "service"
+
+def build_service():
+    return Service()
+"""
+        )
+
+        rebuild_entity_graph([models], codebase_root=temp_dir)
+
+        db_path = temp_dir / ".claude" / "entities.sqlite"
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            instantiates = conn.execute(
+                """
+                SELECT src_qualname, dst_name, resolved
+                FROM relations
+                WHERE relation = 'instantiates'
+                """
+            ).fetchall()
+            assert any(
+                row["src_qualname"].endswith(".build_service")
+                and row["dst_name"].endswith(".Service")
+                and int(row["resolved"]) == 1
+                for row in instantiates
+            )
+
+            overrides = conn.execute(
+                """
+                SELECT src_qualname, dst_name, resolved
+                FROM relations
+                WHERE relation = 'overrides'
+                """
+            ).fetchall()
+            assert any(
+                row["src_qualname"].endswith(".Service.run")
+                and row["dst_name"].endswith(".BaseService.run")
+                and int(row["resolved"]) == 1
+                for row in overrides
+            )
+
+        # sample_config is intentionally passed to exercise the public incremental API shape.
+        assert sample_config["entities"]["enabled"] is True

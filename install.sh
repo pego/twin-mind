@@ -35,6 +35,28 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+install_oxc_parser_runtime() {
+    info "Installing optional JS/TS parser backend (oxc-parser)..."
+
+    if ! command_exists node || ! command_exists npm; then
+        warn "  Node.js/npm not found - JS/TS extraction will use fallback parser."
+        return 0
+    fi
+
+    cat > "$INSTALL_DIR/package.json" <<EOF
+{
+  "name": "twin-mind-runtime",
+  "private": true
+}
+EOF
+
+    if npm install --silent --no-audit --no-fund --prefix "$INSTALL_DIR" oxc-parser >/dev/null 2>&1; then
+        success "  ✓ Installed oxc-parser"
+    else
+        warn "  Could not install oxc-parser - fallback JS/TS parser remains active."
+    fi
+}
+
 # Get Python command (python3 or python)
 get_python_cmd() {
     if command_exists python3; then
@@ -162,7 +184,10 @@ main() {
     "$INSTALL_DIR/venv/bin/pip" install --quiet memvid-sdk
     success "  ✓ Installed memvid-sdk"
 
-    # Step 6: Install twin-mind.py and twin_mind package
+    # Step 6: Install optional JS/TS AST backend
+    install_oxc_parser_runtime
+
+    # Step 7: Install twin-mind.py and twin_mind package
     info "Installing twin-mind..."
 
     # Check if running from repo (local install) or via curl (remote install)
@@ -183,13 +208,13 @@ main() {
         mkdir -p "$INSTALL_DIR/twin_mind/commands"
 
         # Core modules
-        for module in __init__ constants output config fs git memory memvid_check index_state shared_memory indexing auto_init cli; do
+        for module in __init__ constants output config fs git memory memvid_check index_state shared_memory indexing entity_extractors js_oxc entity_graph auto_init cli; do
             download_file "$REPO_URL/scripts/twin_mind/${module}.py" "$INSTALL_DIR/twin_mind/${module}.py"
         done
 
         # Command modules
         download_file "$REPO_URL/scripts/twin_mind/commands/__init__.py" "$INSTALL_DIR/twin_mind/commands/__init__.py"
-        for cmd in init index remember search ask recent stats status reset reindex prune context export doctor upgrade uninstall install_skills; do
+        for cmd in init index remember search ask recent stats status reset reindex prune context entities export doctor upgrade uninstall install_skills; do
             download_file "$REPO_URL/scripts/twin_mind/commands/${cmd}.py" "$INSTALL_DIR/twin_mind/commands/${cmd}.py"
         done
     fi
@@ -197,11 +222,11 @@ main() {
     success "  ✓ Installed twin-mind.py"
     success "  ✓ Installed twin_mind package"
 
-    # Step 7: Create version file (read from constants.py — single source of truth)
+    # Step 8: Create version file (read from constants.py — single source of truth)
     VERSION=$(grep -m1 'VERSION' "$INSTALL_DIR/twin_mind/constants.py" | sed "s/.*VERSION *= *['\"]\\([^'\"]*\\)['\"].*/\\1/")
     echo "$VERSION" > "$INSTALL_DIR/version.txt"
 
-    # Step 8: Download SKILL.md + install-skills.sh, then symlink into all detected agents
+    # Step 9: Download SKILL.md + install-skills.sh, then symlink into all detected agents
     info "Installing skill for detected agents..."
 
     # Save SKILL.md to ~/.agents/skills/twin-mind/ (canonical, matches vercel-labs/skills)
@@ -224,7 +249,7 @@ main() {
     # Run the skills installer
     bash "$INSTALL_DIR/install-skills.sh"
 
-    # Step 9: Add shell alias
+    # Step 10: Add shell alias
     info "Configuring shell alias..."
     SHELL_CONFIG=$(get_shell_config)
     ALIAS_LINE="alias twin-mind=\"$INSTALL_DIR/venv/bin/python $INSTALL_DIR/twin-mind.py\""

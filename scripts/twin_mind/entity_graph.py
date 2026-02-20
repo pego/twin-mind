@@ -1,13 +1,22 @@
 """Entity extraction and knowledge graph queries for twin-mind."""
 
 import ast
+import re
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, DefaultDict, Dict, List, Optional, Sequence, Set, Tuple
 
 from twin_mind.config import parse_size
+from twin_mind.entity_extractors import (
+    EntityExtractionResult,
+    EntityExtractor,
+    EntityExtractorRegistry,
+)
 from twin_mind.fs import FileLock, get_entities_db_path
+from twin_mind.js_oxc import extract_javascript_entities_with_oxc
+
+_EXTRACTOR_REGISTRY = EntityExtractorRegistry()
 
 
 class _PythonEntityVisitor(ast.NodeVisitor):
@@ -216,6 +225,412 @@ def _parse_import_alias(raw: str) -> Tuple[str, str]:
     return alias, target
 
 
+def _resolve_js_import_symbol(module_name: str, import_path: str) -> str:
+    raw = import_path.strip().replace("\\", "/")
+    if not raw:
+        return ""
+
+    base, _ = re.subn(r"\.(js|jsx|mjs|cjs|ts|tsx)$", "", raw, flags=re.IGNORECASE)
+    path_value = base
+    if path_value.startswith("."):
+        current_parts = [part for part in module_name.split(".")[:-1] if part]
+        for part in path_value.split("/"):
+            if not part or part == ".":
+                continue
+            if part == "..":
+                if current_parts:
+                    current_parts.pop()
+                continue
+            current_parts.append(part)
+        return ".".join(current_parts)
+
+    return path_value.replace("/", ".")
+
+
+def _line_for_offset(text: str, offset: int) -> int:
+    return text.count("\n", 0, max(offset, 0)) + 1
+
+
+def _neutralize_js_content(content: str) -> str:
+    """Replace JS/TS strings and comments with spaces while preserving offsets/newlines."""
+    chars = list(content)
+    out = chars[:]
+    i = 0
+    n = len(chars)
+    state = "code"
+    quote = ""
+
+    while i < n:
+        c = chars[i]
+        nxt = chars[i + 1] if i + 1 < n else ""
+
+        if state == "code":
+            if c == "/" and nxt == "/":
+                out[i] = " "
+                out[i + 1] = " "
+                i += 2
+                state = "line_comment"
+                continue
+            if c == "/" and nxt == "*":
+                out[i] = " "
+                out[i + 1] = " "
+                i += 2
+                state = "block_comment"
+                continue
+            if c in ("'", '"', "`"):
+                quote = c
+                out[i] = " "
+                i += 1
+                state = "string"
+                continue
+            i += 1
+            continue
+
+        if state == "line_comment":
+            if c == "\n":
+                i += 1
+                state = "code"
+                continue
+            out[i] = " "
+            i += 1
+            continue
+
+        if state == "block_comment":
+            if c == "*" and nxt == "/":
+                out[i] = " "
+                out[i + 1] = " "
+                i += 2
+                state = "code"
+                continue
+            if c != "\n":
+                out[i] = " "
+            i += 1
+            continue
+
+        if state == "string":
+            if c == "\\" and i + 1 < n:
+                if out[i] != "\n":
+                    out[i] = " "
+                if out[i + 1] != "\n":
+                    out[i + 1] = " "
+                i += 2
+                continue
+            if c == quote:
+                out[i] = " "
+                i += 1
+                state = "code"
+                continue
+            if c != "\n":
+                out[i] = " "
+            i += 1
+            continue
+
+    return "".join(out)
+
+
+def _find_matching_brace(text: str, open_index: int) -> Optional[int]:
+    if open_index < 0 or open_index >= len(text) or text[open_index] != "{":
+        return None
+    depth = 1
+    idx = open_index + 1
+    while idx < len(text):
+        c = text[idx]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return idx
+        idx += 1
+    return None
+
+
+def _add_js_import_relations(
+    module_scope: str,
+    line: int,
+    module_symbol: str,
+    specifier: str,
+    add_relation: Any,
+) -> None:
+    spec = specifier.strip()
+    if not module_symbol:
+        return
+
+    add_relation(module_scope, module_symbol, "imports", line)
+
+    def add_alias(local_name: str, target: str) -> None:
+        alias = local_name.strip()
+        dst = target.strip()
+        if alias and dst:
+            add_relation(module_scope, f"{alias}={dst}", "imports_alias", line)
+
+    star_match = re.search(r"\*\s+as\s+([A-Za-z_$][\w$]*)", spec)
+    if star_match:
+        add_alias(star_match.group(1), module_symbol)
+
+    named_match = re.search(r"\{([^}]*)\}", spec, flags=re.DOTALL)
+    if named_match:
+        for raw_item in named_match.group(1).split(","):
+            token = raw_item.strip()
+            if not token:
+                continue
+            if token.startswith("type "):
+                token = token[5:].strip()
+            if not token:
+                continue
+            if " as " in token:
+                imported_name, alias_name = [part.strip() for part in token.split(" as ", 1)]
+            elif ":" in token:
+                imported_name, alias_name = [part.strip() for part in token.split(":", 1)]
+            else:
+                imported_name = token
+                alias_name = token
+            if not imported_name:
+                continue
+            full_target = f"{module_symbol}.{imported_name}"
+            add_relation(module_scope, full_target, "imports", line)
+            add_alias(alias_name or imported_name, full_target)
+
+    default_part = spec
+    if "{" in default_part:
+        default_part = default_part.split("{", 1)[0].strip().rstrip(",")
+    if "*" in default_part:
+        default_part = ""
+    default_name = default_part.strip()
+    if default_name and default_name != "type":
+        add_alias(default_name, module_symbol)
+
+
+def _collect_js_calls(body_text: str) -> List[Tuple[str, int]]:
+    calls: List[Tuple[str, int]] = []
+    call_pattern = re.compile(r"(?<![\w$.])([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(")
+    skip = {
+        "if",
+        "for",
+        "while",
+        "switch",
+        "catch",
+        "return",
+        "typeof",
+        "await",
+        "function",
+        "import",
+    }
+    for match in call_pattern.finditer(body_text):
+        callee = match.group(1)
+        if callee in skip:
+            continue
+        calls.append((callee, match.start()))
+    return calls
+
+
+def _extract_javascript_entities_fallback(file_path: str, content: str) -> EntityExtractionResult:
+    """Extract entities + relations for JavaScript/TypeScript files."""
+    neutral = _neutralize_js_content(content)
+    module_name = _module_name_from_path(file_path)
+    entities: List[Dict[str, Any]] = [
+        {
+            "file_path": file_path,
+            "name": module_name,
+            "qualname": module_name,
+            "kind": "module",
+            "line": 1,
+        }
+    ]
+    relations: List[Dict[str, Any]] = []
+
+    def add_relation(src: str, dst: str, relation: str, line: int) -> None:
+        if not src or not dst:
+            return
+        relations.append(
+            {
+                "file_path": file_path,
+                "src_qualname": src,
+                "dst_name": dst,
+                "relation": relation,
+                "line": line,
+            }
+        )
+
+    def add_entity(parent: str, name: str, kind: str, line: int) -> str:
+        qualname = f"{parent}.{name}"
+        entities.append(
+            {
+                "file_path": file_path,
+                "name": name,
+                "qualname": qualname,
+                "kind": kind,
+                "line": line,
+            }
+        )
+        add_relation(parent, qualname, "defines", line)
+        return qualname
+
+    module_scope = module_name
+    entity_keys: Set[Tuple[str, str]] = {(module_scope, "module")}
+    scoped_blocks: List[Tuple[str, int, int]] = []
+
+    import_pattern = re.compile(
+        r"import\s+([\s\S]*?)\s+from\s+['\"]([^'\"]+)['\"]\s*;?",
+        flags=re.MULTILINE,
+    )
+    for match in import_pattern.finditer(content):
+        specifier = match.group(1).strip()
+        import_path = match.group(2).strip()
+        module_symbol = _resolve_js_import_symbol(module_name, import_path)
+        line = _line_for_offset(content, match.start())
+        _add_js_import_relations(module_scope, line, module_symbol, specifier, add_relation)
+
+    side_effect_import_pattern = re.compile(
+        r"(?m)^\s*import\s+['\"]([^'\"]+)['\"]\s*;?",
+    )
+    for match in side_effect_import_pattern.finditer(content):
+        import_path = match.group(1).strip()
+        module_symbol = _resolve_js_import_symbol(module_name, import_path)
+        if module_symbol:
+            add_relation(module_scope, module_symbol, "imports", _line_for_offset(content, match.start()))
+
+    require_pattern = re.compile(
+        r"(?m)^\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*require\(\s*['\"]([^'\"]+)['\"]\s*\)\s*;?",
+    )
+    for match in require_pattern.finditer(content):
+        local_name = match.group(1)
+        import_path = match.group(2).strip()
+        module_symbol = _resolve_js_import_symbol(module_name, import_path)
+        line = _line_for_offset(content, match.start())
+        if module_symbol:
+            add_relation(module_scope, module_symbol, "imports", line)
+            add_relation(module_scope, f"{local_name}={module_symbol}", "imports_alias", line)
+
+    require_destructured_pattern = re.compile(
+        r"(?m)^\s*(?:const|let|var)\s*\{([^}]+)\}\s*=\s*require\(\s*['\"]([^'\"]+)['\"]\s*\)\s*;?",
+    )
+    for match in require_destructured_pattern.finditer(content):
+        import_spec = match.group(1).strip()
+        import_path = match.group(2).strip()
+        module_symbol = _resolve_js_import_symbol(module_name, import_path)
+        line = _line_for_offset(content, match.start())
+        if not module_symbol:
+            continue
+        add_relation(module_scope, module_symbol, "imports", line)
+        for item in import_spec.split(","):
+            token = item.strip()
+            if not token:
+                continue
+            if ":" in token:
+                imported_name, alias_name = [part.strip() for part in token.split(":", 1)]
+            else:
+                imported_name = token
+                alias_name = token
+            if not imported_name:
+                continue
+            full_target = f"{module_symbol}.{imported_name}"
+            add_relation(module_scope, full_target, "imports", line)
+            add_relation(module_scope, f"{alias_name}={full_target}", "imports_alias", line)
+
+    class_pattern = re.compile(
+        r"\b(?:export\s+)?(?:default\s+)?class\s+([A-Za-z_$][\w$]*)"
+        r"(?:\s+extends\s+([A-Za-z_$][\w$.]*))?\s*\{"
+    )
+    method_pattern = re.compile(
+        r"(?m)^\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{"
+    )
+    method_skip = {"if", "for", "while", "switch", "catch"}
+
+    for match in class_pattern.finditer(neutral):
+        class_name = match.group(1)
+        base_name = (match.group(2) or "").strip()
+        line = _line_for_offset(content, match.start())
+        class_qualname = f"{module_scope}.{class_name}"
+        if (class_qualname, "class") not in entity_keys:
+            add_entity(module_scope, class_name, "class", line)
+            entity_keys.add((class_qualname, "class"))
+        if base_name:
+            add_relation(class_qualname, base_name, "inherits", line)
+
+        class_open = match.end() - 1
+        class_close = _find_matching_brace(neutral, class_open)
+        if class_close is None:
+            continue
+
+        body_start = class_open + 1
+        body_end = class_close
+        class_body = neutral[body_start:body_end]
+        for method_match in method_pattern.finditer(class_body):
+            method_name = method_match.group(1)
+            if method_name in method_skip:
+                continue
+            abs_start = body_start + method_match.start()
+            method_line = _line_for_offset(content, abs_start)
+            method_qual = f"{class_qualname}.{method_name}"
+            if (method_qual, "method") not in entity_keys:
+                add_entity(class_qualname, method_name, "method", method_line)
+                entity_keys.add((method_qual, "method"))
+
+            method_open = body_start + method_match.end() - 1
+            method_close = _find_matching_brace(neutral, method_open)
+            if method_close is None or method_close > body_end:
+                continue
+            scoped_blocks.append((method_qual, method_open + 1, method_close))
+
+    depth_prefix = [0] * (len(neutral) + 1)
+    depth = 0
+    for idx, char in enumerate(neutral):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth = max(0, depth - 1)
+        depth_prefix[idx + 1] = depth
+
+    function_patterns = [
+        re.compile(
+            r"(?m)^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+"
+            r"([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{"
+        ),
+        re.compile(
+            r"(?m)^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*"
+            r"(?:async\s+)?function\b[^{]*\{"
+        ),
+        re.compile(
+            r"(?m)^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*"
+            r"(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*\{"
+        ),
+    ]
+
+    for pattern in function_patterns:
+        for match in pattern.finditer(neutral):
+            if depth_prefix[match.start()] != 0:
+                continue
+            function_name = match.group(1)
+            function_qual = f"{module_scope}.{function_name}"
+            line = _line_for_offset(content, match.start())
+            if (function_qual, "function") not in entity_keys:
+                add_entity(module_scope, function_name, "function", line)
+                entity_keys.add((function_qual, "function"))
+
+            function_open = match.end() - 1
+            function_close = _find_matching_brace(neutral, function_open)
+            if function_close is None:
+                continue
+            scoped_blocks.append((function_qual, function_open + 1, function_close))
+
+    for scope_qualname, body_start, body_end in scoped_blocks:
+        body = neutral[body_start:body_end]
+        for callee, rel_offset in _collect_js_calls(body):
+            line = _line_for_offset(content, body_start + rel_offset)
+            add_relation(scope_qualname, callee, "calls", line)
+
+    return entities, relations
+
+
+def extract_javascript_entities(file_path: str, content: str) -> EntityExtractionResult:
+    """Extract JS/TS entities, preferring oxc-parser when available."""
+    extracted = extract_javascript_entities_with_oxc(file_path, content)
+    if extracted is not None:
+        return extracted
+    return _extract_javascript_entities_fallback(file_path, content)
+
+
 def _table_columns(conn: sqlite3.Connection, table: str) -> Set[str]:
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     columns: Set[str] = set()
@@ -318,6 +733,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     )
     if added_link_columns:
         _resolve_relations(conn)
+        _derive_rich_relations(conn)
     conn.commit()
 
 
@@ -347,10 +763,50 @@ def extract_python_entities(file_path: str, content: str) -> Tuple[List[Dict[str
     return visitor.entities, visitor.relations
 
 
+def _register_default_extractors() -> None:
+    """Register built-in language extractors."""
+    if _EXTRACTOR_REGISTRY.supports_path("placeholder.py"):
+        return
+    _EXTRACTOR_REGISTRY.register(
+        EntityExtractor(
+            language="python",
+            extensions=(".py",),
+            extract=extract_python_entities,
+        )
+    )
+    _EXTRACTOR_REGISTRY.register(
+        EntityExtractor(
+            language="javascript",
+            extensions=(".js", ".jsx", ".mjs", ".cjs"),
+            extract=extract_javascript_entities,
+        )
+    )
+    _EXTRACTOR_REGISTRY.register(
+        EntityExtractor(
+            language="typescript",
+            extensions=(".ts", ".tsx"),
+            extract=extract_javascript_entities,
+        )
+    )
+
+
+def extract_entities(file_path: str, content: str) -> EntityExtractionResult:
+    """Extract entities + relations for a supported file path."""
+    return _EXTRACTOR_REGISTRY.extract_for_path(file_path, content)
+
+
+def supported_entity_languages() -> List[str]:
+    """Return currently supported entity extraction languages."""
+    return _EXTRACTOR_REGISTRY.supported_languages()
+
+
+_register_default_extractors()
+
+
 def _index_file_content(
     conn: sqlite3.Connection, file_path: str, content: str
 ) -> Tuple[int, int]:
-    entities, relations = extract_python_entities(file_path, content)
+    entities, relations = extract_entities(file_path, content)
     if not entities and not relations:
         return 0, 0
 
@@ -693,6 +1149,135 @@ def _resolve_relations(conn: sqlite3.Connection) -> None:
     )
 
 
+def _derive_rich_relations(conn: sqlite3.Connection) -> None:
+    required_columns = {"src_entity_id", "dst_entity_id", "resolved", "confidence"}
+    if not required_columns.issubset(_table_columns(conn, "relations")):
+        return
+
+    conn.execute("DELETE FROM relations WHERE relation IN ('instantiates', 'overrides')")
+
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO relations(
+            file_path, src_qualname, dst_name, relation, line,
+            src_entity_id, dst_entity_id, resolved, confidence
+        )
+        SELECT
+            r.file_path,
+            r.src_qualname,
+            COALESCE(cls.qualname, r.dst_name),
+            'instantiates',
+            r.line,
+            r.src_entity_id,
+            r.dst_entity_id,
+            1,
+            r.confidence
+        FROM relations r
+        JOIN entities cls
+            ON cls.id = r.dst_entity_id
+        WHERE r.relation = 'calls'
+          AND r.resolved = 1
+          AND cls.kind = 'class'
+        """
+    )
+
+    class_rows = conn.execute(
+        """
+        SELECT id, qualname
+        FROM entities
+        WHERE kind = 'class'
+        """
+    ).fetchall()
+    if not class_rows:
+        return
+
+    class_id_by_qualname: Dict[str, int] = {
+        str(row["qualname"]).strip().lower(): int(row["id"]) for row in class_rows
+    }
+
+    method_rows = conn.execute(
+        """
+        SELECT id, file_path, name, qualname, line
+        FROM entities
+        WHERE kind = 'method'
+        """
+    ).fetchall()
+
+    methods_by_class_and_name: DefaultDict[Tuple[int, str], List[sqlite3.Row]] = defaultdict(list)
+    for row in method_rows:
+        qualname = str(row["qualname"]).strip()
+        if "." not in qualname:
+            continue
+        class_qualname = qualname.rsplit(".", 1)[0].lower()
+        class_id = class_id_by_qualname.get(class_qualname)
+        if class_id is None:
+            continue
+        name = str(row["name"]).strip().lower()
+        methods_by_class_and_name[(class_id, name)].append(row)
+
+    inheritance_rows = conn.execute(
+        """
+        SELECT src_entity_id AS subclass_id, dst_entity_id AS base_class_id
+        FROM relations
+        WHERE relation = 'inherits'
+          AND resolved = 1
+          AND src_entity_id IS NOT NULL
+          AND dst_entity_id IS NOT NULL
+        """
+    ).fetchall()
+
+    override_rows: List[Tuple[str, str, str, int, int, int, float]] = []
+    seen: Set[Tuple[int, int]] = set()
+
+    for row in inheritance_rows:
+        subclass_id = int(row["subclass_id"])
+        base_class_id = int(row["base_class_id"])
+
+        subclass_method_keys = {
+            method_name for class_id, method_name in methods_by_class_and_name if class_id == subclass_id
+        }
+        if not subclass_method_keys:
+            continue
+
+        for method_name in subclass_method_keys:
+            subclass_methods = methods_by_class_and_name.get((subclass_id, method_name), [])
+            base_methods = methods_by_class_and_name.get((base_class_id, method_name), [])
+            if not subclass_methods or not base_methods:
+                continue
+
+            for subclass_method in subclass_methods:
+                subclass_method_id = int(subclass_method["id"])
+                for base_method in base_methods:
+                    base_method_id = int(base_method["id"])
+                    pair_key = (subclass_method_id, base_method_id)
+                    if pair_key in seen:
+                        continue
+                    seen.add(pair_key)
+                    override_rows.append(
+                        (
+                            str(subclass_method["file_path"]),
+                            str(subclass_method["qualname"]),
+                            str(base_method["qualname"]),
+                            int(subclass_method["line"]),
+                            subclass_method_id,
+                            base_method_id,
+                            1.0,
+                        )
+                    )
+
+    if override_rows:
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO relations(
+                file_path, src_qualname, dst_name, relation, line,
+                src_entity_id, dst_entity_id, resolved, confidence
+            )
+            VALUES (?, ?, ?, 'overrides', ?, ?, ?, 1, ?)
+            """,
+            override_rows,
+        )
+
+
 def rebuild_entity_graph(
     files: Sequence[Path], codebase_root: Optional[Path] = None
 ) -> Tuple[int, int, int]:
@@ -711,12 +1296,14 @@ def rebuild_entity_graph(
             conn.execute("DELETE FROM entities")
 
             for file_path in files:
-                if file_path.suffix.lower() != ".py" or not file_path.exists():
+                if not file_path.exists():
                     continue
                 try:
                     rel_path = str(file_path.relative_to(root))
                 except ValueError:
                     rel_path = str(file_path)
+                if not _EXTRACTOR_REGISTRY.supports_path(rel_path):
+                    continue
 
                 content = file_path.read_text(encoding="utf-8", errors="ignore")
                 entity_count, relation_count = _index_file_content(conn, rel_path, content)
@@ -726,6 +1313,7 @@ def rebuild_entity_graph(
                 indexed_relations += relation_count
 
             _resolve_relations(conn)
+            _derive_rich_relations(conn)
             conn.commit()
 
     return indexed_files, indexed_entities, indexed_relations
@@ -756,7 +1344,7 @@ def update_entity_graph_incremental(
 
             for rel_path in changed_files:
                 file_path = root / rel_path
-                if not file_path.exists() or file_path.suffix.lower() != ".py":
+                if not file_path.exists() or not _EXTRACTOR_REGISTRY.supports_path(rel_path):
                     continue
                 try:
                     if file_path.stat().st_size > max_size:
@@ -772,6 +1360,7 @@ def update_entity_graph_incremental(
                 indexed_relations += relation_count
 
             _resolve_relations(conn)
+            _derive_rich_relations(conn)
             conn.commit()
 
     return indexed_files, indexed_entities, indexed_relations
